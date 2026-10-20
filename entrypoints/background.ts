@@ -125,6 +125,36 @@ export default defineBackground(() => {
           break;
         }
 
+        case 'CHECK_SHOULD_PROMPT_SAVE': {
+          const unlocked = await isVaultUnlocked();
+          if (!unlocked) {
+            sendResponse({ shouldPrompt: false });
+            return;
+          }
+          const items = await loadVaultFromLocalEncrypted();
+          const matched = matchVaultItemsForUrl(items, request.url || '');
+          const inputUser = (request.username || '').trim().toLowerCase();
+          const existing = matched.find(
+            (i) => (i.username || '').trim().toLowerCase() === inputUser
+          );
+
+          if (existing) {
+            if (existing.password === request.password) {
+              // Exact match! Already saved with same password
+              sendResponse({ shouldPrompt: false, isUpdate: false });
+              return;
+            } else {
+              // Password was updated on the website
+              sendResponse({ shouldPrompt: true, isUpdate: true, existingId: existing.id, title: existing.title });
+              return;
+            }
+          }
+
+          // New credential
+          sendResponse({ shouldPrompt: true, isUpdate: false });
+          break;
+        }
+
         case 'SAVE_NEW_CREDENTIAL': {
           if (!(await isVaultUnlocked())) {
             sendResponse({ success: false, message: '请先在插件中解锁保险箱' });
@@ -132,11 +162,12 @@ export default defineBackground(() => {
           }
           try {
             const saved = await saveVaultItem({
+              id: request.id,
               title: request.title || '新网站',
               username: request.username || '',
               password: request.password || '',
               urls: request.url ? [request.url] : [],
-              notes: '由网页自动捕获保存',
+              notes: request.notes || '由网页自动捕获保存',
             });
             // Trigger background sync
             const opts = await getSyncOptions();

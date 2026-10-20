@@ -513,12 +513,49 @@ function setupCredentialCapture() {
     const password = pwdInput.value;
 
     if (username && password) {
-      showSavePrompt(username, password, window.location.hostname, document.title);
+      // 1. Instant check against local matchedItems
+      const localMatch = matchedItems.find(
+        (i) => (i.username || '').trim().toLowerCase() === username.toLowerCase()
+      );
+      if (localMatch && localMatch.password === password) {
+        // Already saved with identical password, do not prompt!
+        return;
+      }
+
+      // 2. Authoritative check with background vault
+      chrome.runtime.sendMessage(
+        {
+          type: 'CHECK_SHOULD_PROMPT_SAVE',
+          url: window.location.href,
+          username,
+          password,
+        },
+        (res) => {
+          if (chrome.runtime.lastError || !res || !res.shouldPrompt) {
+            return;
+          }
+          showSavePrompt(
+            username,
+            password,
+            window.location.hostname,
+            res.title || document.title,
+            res.isUpdate,
+            res.existingId
+          );
+        }
+      );
     }
   }, true);
 }
 
-function showSavePrompt(username: string, pass: string, hostname: string, pageTitle: string) {
+function showSavePrompt(
+  username: string,
+  pass: string,
+  hostname: string,
+  pageTitle: string,
+  isUpdate = false,
+  existingId?: string
+) {
   const existingPrompt = document.getElementById('passmark-save-prompt');
   if (existingPrompt) existingPrompt.remove();
 
@@ -540,16 +577,22 @@ function showSavePrompt(username: string, pass: string, hostname: string, pageTi
     max-width: 320px;
   `;
 
+  const titleText = isUpdate ? '更新密码到 PassMark？' : '保存密码到 PassMark？';
+  const descText = isUpdate
+    ? `检测到 <b>${escapeHtml(username)}</b> (${escapeHtml(hostname)}) 的密码已更改，是否同步更新？`
+    : `是否将 <b>${escapeHtml(username)}</b> (${escapeHtml(hostname)}) 的密码加密保存并同步到云端？`;
+  const actionBtnText = isUpdate ? '更新密码' : '保存';
+
   banner.innerHTML = `
     <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-      <span>🔒</span> 保存密码到 PassMark？
+      <span>🔒</span> ${titleText}
     </div>
     <div style="font-size: 12px; color: #64748b; margin-bottom: 12px;">
-      是否将 <b>${escapeHtml(username)}</b> (${escapeHtml(hostname)}) 的密码加密保存并同步到云端？
+      ${descText}
     </div>
     <div style="display: flex; justify-content: flex-end; gap: 8px;">
       <button id="pm-btn-cancel" style="padding: 5px 12px; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; font-size: 12px; color: #475569;">暂不保存</button>
-      <button id="pm-btn-save" style="padding: 5px 12px; border-radius: 6px; border: none; background: #4f46e5; color: #fff; cursor: pointer; font-size: 12px; font-weight: 500;">保存</button>
+      <button id="pm-btn-save" style="padding: 5px 12px; border-radius: 6px; border: none; background: #4f46e5; color: #fff; cursor: pointer; font-size: 12px; font-weight: 500;">${actionBtnText}</button>
     </div>
   `;
 
@@ -563,6 +606,7 @@ function showSavePrompt(username: string, pass: string, hostname: string, pageTi
     chrome.runtime.sendMessage(
       {
         type: 'SAVE_NEW_CREDENTIAL',
+        id: existingId,
         title: pageTitle || hostname,
         username,
         password: pass,
@@ -571,7 +615,7 @@ function showSavePrompt(username: string, pass: string, hostname: string, pageTi
       (res) => {
         banner.remove();
         if (res && res.success) {
-          showNotification('密码已安全加密保存！');
+          showNotification(isUpdate ? '密码已成功更新！' : '密码已安全加密保存！');
         }
       }
     );
