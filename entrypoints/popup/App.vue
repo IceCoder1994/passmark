@@ -562,8 +562,15 @@ function formatRelativeTime(timestamp: number | null): string {
             <span class="text-slate-600 font-medium">{{ formatRelativeTime(syncState.lastSyncTime) }}</span>
           </div>
 
-          <div v-if="syncState.lastError" class="p-2 bg-rose-50 rounded-lg text-rose-700 text-[11px] border border-rose-200">
-            {{ syncState.lastError }}
+          <div v-if="syncState.lastError" class="p-2.5 bg-rose-50 rounded-xl text-rose-700 text-[11px] border border-rose-200 space-y-1.5">
+            <p>{{ syncState.lastError }}</p>
+            <button
+              v-if="syncState.lastError.includes('不匹配') || syncState.lastError.includes('不同加密盐')"
+              @click="openOptionsPage"
+              class="w-full py-1 text-center bg-rose-600 text-white rounded-md text-[10px] font-semibold hover:bg-rose-700 transition"
+            >
+              前往设置一键重置或恢复云端
+            </button>
           </div>
         </div>
 

@@ -130,6 +130,57 @@ export default defineBackground(() => {
           break;
         }
 
+        case 'RESET_CLOUD_VAULT': {
+          const key = await ensureActiveCryptoKey();
+          if (!key) {
+            sendResponse({ success: false, message: '请先解锁保险箱' });
+            return;
+          }
+          try {
+            const webdavConfig = await getWebDavConfig();
+            const webdav = new WebDavClient(webdavConfig);
+            const security = await getSecurityConfig();
+            const verifier = await getAuthVerifier();
+            const now = Date.now();
+
+            // 1. Re-encrypt local bookmarks
+            const localBookmarks = await getLocalBookmarkTree();
+            const encBookmarks = await encryptObject(localBookmarks, key);
+            await webdav.putFile('bookmarks.enc', encBookmarks, 'text/plain');
+
+            // 2. Re-encrypt local vault
+            const localVault = await loadVaultFromLocalEncrypted();
+            const encVault = await encryptObject(localVault, key);
+            await webdav.putFile('vault.enc', encVault, 'text/plain');
+
+            // 3. Update meta.json with current salt
+            const meta: RemoteMeta = {
+              version: 1,
+              salt: security.salt,
+              verifier: verifier || undefined,
+              bookmarksLastModified: now,
+              vaultLastModified: now,
+            };
+            await webdav.putMeta(meta);
+
+            await updateSyncState({
+              isSyncing: false,
+              lastSyncTime: now,
+              lastError: null,
+              bookmarkCount: countBookmarks(localBookmarks),
+              vaultCount: localVault.length,
+            });
+
+            sendResponse({
+              success: true,
+              message: `云端已成功重新初始化！已同步 ${countBookmarks(localBookmarks)} 个书签，${localVault.length} 条密码。`,
+            });
+          } catch (err: any) {
+            sendResponse({ success: false, message: err.message || '重置失败' });
+          }
+          break;
+        }
+
         case 'GET_MATCHING_CREDENTIALS': {
           const unlocked = await isVaultUnlocked();
           if (!unlocked) {

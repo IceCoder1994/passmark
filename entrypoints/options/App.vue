@@ -295,6 +295,22 @@ function handleForcePullFromCloud() {
   });
 }
 
+// Reset cloud vault using current local master password and data
+function handleResetCloudVault() {
+  if (!confirm('确认使用当前本地的数据和主密码重新初始化 WebDAV 云端备份？此操作将以本地数据为准重置云端加密密钥并全量推送。')) {
+    return;
+  }
+  isSyncing.value = true;
+  syncResult.value = null;
+  chrome.runtime.sendMessage({ type: 'RESET_CLOUD_VAULT' }, (res) => {
+    isSyncing.value = false;
+    syncResult.value = res;
+    if (res && res.success) {
+      cloudVaultDetected.value = false;
+    }
+  });
+}
+
 // Save all configurations
 async function handleSaveSettings() {
   isSaving.value = true;
@@ -636,6 +652,15 @@ async function handleTriggerSync() {
             </div>
 
             <div class="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                @click="handleResetCloudVault"
+                :disabled="isSyncing"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition"
+              >
+                <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isSyncing }" />
+                以当前主密码重新初始化云端备份
+              </button>
               <button
                 type="button"
                 @click="handleForcePullFromCloud"
