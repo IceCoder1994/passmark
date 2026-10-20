@@ -48,7 +48,12 @@ export class WebDavClient {
   /**
    * Test connection and ensure target sync folder exists
    */
-  async testConnection(): Promise<{ success: boolean; message: string }> {
+  async testConnection(): Promise<{
+    success: boolean;
+    message: string;
+    hasExistingVault?: boolean;
+    meta?: RemoteMeta | null;
+  }> {
     try {
       // 1. First probe base url or dir with PROPFIND
       const dirUrl = this.getDirUrl();
@@ -68,14 +73,23 @@ export class WebDavClient {
         // Try creating directory
         const created = await this.ensureDirectory();
         if (created) {
-          return { success: true, message: '连接成功，已自动创建远程同步目录' };
+          return { success: true, message: '连接成功，已自动创建远程同步目录', hasExistingVault: false };
         } else {
           return { success: false, message: '未找到同步目录，且尝试自动创建失败' };
         }
       }
 
       if (res.ok || res.status === 207) {
-        return { success: true, message: 'WebDAV 服务连接正常' };
+        const meta = await this.getMeta();
+        if (meta && meta.salt) {
+          return {
+            success: true,
+            message: 'WebDAV 连接正常，检测到已有云端保险箱备份！',
+            hasExistingVault: true,
+            meta,
+          };
+        }
+        return { success: true, message: 'WebDAV 服务连接正常，目标目录为空', hasExistingVault: false };
       }
 
       return { success: false, message: `连接异常，服务器响应 HTTP ${res.status}` };

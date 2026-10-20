@@ -9,6 +9,7 @@ import {
   lockVault,
   setupMasterPassword,
   verifyMasterPassword,
+  connectAndRestoreFromCloud,
   loadVaultFromLocalEncrypted,
   saveVaultItem,
   deleteVaultItem,
@@ -91,6 +92,17 @@ export default defineBackground(() => {
         case 'SETUP_MASTER_PASSWORD': {
           const ok = await setupMasterPassword(request.password);
           sendResponse({ success: ok });
+          break;
+        }
+
+        case 'CONNECT_CLOUD_VAULT': {
+          const res = await connectAndRestoreFromCloud(request.password, request.remoteMeta);
+          if (res.success) {
+            const syncRes = await performSync();
+            sendResponse({ success: true, message: syncRes.message });
+          } else {
+            sendResponse(res);
+          }
           break;
         }
 

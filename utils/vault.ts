@@ -140,6 +140,47 @@ export function setActiveCryptoKey(key: CryptoKey): void {
 }
 
 /**
+ * Connect to an existing cloud vault using master password and remote salt
+ */
+export async function connectAndRestoreFromCloud(
+  password: string,
+  remoteMeta: RemoteMeta
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const key = await deriveKey(password, remoteMeta.salt);
+
+    // If verifier is present, verify password correctness
+    if (remoteMeta.verifier) {
+      try {
+        const decrypted = await decryptText(remoteMeta.verifier, key);
+        if (decrypted !== AUTH_CHECK_PAYLOAD) {
+          return { success: false, message: '主密码错误，无法解密该云端保险箱' };
+        }
+      } catch {
+        return { success: false, message: '主密码错误，无法解密该云端保险箱' };
+      }
+    }
+
+    // Save security config with remote salt
+    await setSecurityConfig({
+      salt: remoteMeta.salt,
+      lockTimeoutMinutes: 15,
+      isConfigured: true,
+    });
+
+    const verifier = remoteMeta.verifier || (await encryptText(AUTH_CHECK_PAYLOAD, key));
+    await setAuthVerifier(verifier);
+
+    // Set key and persist to device work key for Mode A
+    setActiveCryptoKey(key);
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, message: err.message || '恢复云端保险箱失败' };
+  }
+}
+
+/**
  * Initialize Master Password for the first time
  */
 export async function setupMasterPassword(password: string): Promise<boolean> {

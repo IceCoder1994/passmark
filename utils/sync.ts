@@ -3,6 +3,7 @@ import {
   getWebDavConfig,
   getSyncOptions,
   getSecurityConfig,
+  getAuthVerifier,
   updateSyncState,
   getSyncState,
   getEncryptedVault,
@@ -15,6 +16,7 @@ import {
   countBookmarks,
 } from './bookmarks';
 import {
+  ensureActiveCryptoKey,
   getActiveCryptoKey,
   loadVaultFromLocalEncrypted,
   saveVaultItemsLocal,
@@ -43,7 +45,7 @@ export async function performSync(overrideKey?: CryptoKey): Promise<{ success: b
     return { success: false, message: '尚未设置主密码，无法进行端到端加密同步' };
   }
 
-  const key = overrideKey || getActiveCryptoKey();
+  const key = overrideKey || (await ensureActiveCryptoKey());
   if (!key) {
     return { success: false, message: '保险箱处于锁定状态，请输入主密码解锁后再同步' };
   }
@@ -59,14 +61,24 @@ export async function performSync(overrideKey?: CryptoKey): Promise<{ success: b
     await webdav.ensureDirectory();
     let remoteMeta = await webdav.getMeta();
     const now = Date.now();
+    const localVerifier = await getAuthVerifier();
 
     if (!remoteMeta) {
       remoteMeta = {
         version: 1,
         salt: security.salt,
+        verifier: localVerifier || undefined,
         bookmarksLastModified: now,
         vaultLastModified: now,
       };
+    } else {
+      // Check salt match: prevent accidental overwrite if local salt differs from cloud
+      if (remoteMeta.salt && security.salt && remoteMeta.salt !== security.salt) {
+        throw new Error('检测到云端存在不同加密盐的保险箱，请在设置中输入原主密码以同步恢复云端数据');
+      }
+      if (!remoteMeta.verifier && localVerifier) {
+        remoteMeta.verifier = localVerifier;
+      }
     }
 
     let finalBookmarkCount = 0;
@@ -86,7 +98,8 @@ export async function performSync(overrideKey?: CryptoKey): Promise<{ success: b
           // Apply differences to local Chrome
           await applyRemoteBookmarkTree(mergedBookmarks);
         } catch (decryptErr) {
-          console.warn('Failed to decrypt remote bookmarks, may be different master key or first run:', decryptErr);
+          console.error('Failed to decrypt remote bookmarks:', decryptErr);
+          throw new Error('解密云端书签失败：主密码与云端加密密钥不匹配');
         }
       }
 
@@ -109,7 +122,8 @@ export async function performSync(overrideKey?: CryptoKey): Promise<{ success: b
           mergedVault = mergeVaultItems(localVaultItems, remoteVaultItems);
           await saveVaultItemsLocal(mergedVault);
         } catch (decryptErr) {
-          console.warn('Failed to decrypt remote vault:', decryptErr);
+          console.error('Failed to decrypt remote vault:', decryptErr);
+          throw new Error('解密云端密码库失败：主密码与云端加密密钥不匹配，请检查主密码是否正确');
         }
       }
 

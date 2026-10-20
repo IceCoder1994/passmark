@@ -186,7 +186,24 @@ GitHub,https://github.com/login,alice,github_token_xyz,`;
   assert(parsedItems[0].notes === 'Work Account', 'Row 1 notes match');
   assert(parsedItems[1].title === 'GitHub' && parsedItems[1].password === 'github_token_xyz', 'Row 2 parsed correctly');
 
-  console.log(`\n========================================`);
+  // 8. Test Cloud-First Restore (Multi-device / Reinstall recovery)
+  console.log('\n[8] Testing Multi-device & Reinstall Cloud Restore:');
+  const cloudSalt = generateSalt();
+  const originalMasterPassword = 'MyCloudPassword#2026';
+  const originalKey = await deriveKey(originalMasterPassword, cloudSalt);
+  const cloudVerifier = await encryptText(AUTH_CHECK_PAYLOAD, originalKey);
+
+  // Payload encrypted on Machine 1
+  const machine1Payload = { secret: 'Machine 1 Data', count: 348 };
+  const encryptedOnMachine1 = await encryptObject(machine1Payload, originalKey);
+
+  // Machine 2 / Fresh install derives key using cloudSalt from meta.json
+  const restoredKeyOnMachine2 = await deriveKey(originalMasterPassword, cloudSalt);
+  const decryptedVerifier = await decryptText(cloudVerifier, restoredKeyOnMachine2);
+  assert(decryptedVerifier === AUTH_CHECK_PAYLOAD, 'Machine 2 verifies master password against cloud verifier');
+
+  const decryptedOnMachine2 = await decryptObject<typeof machine1Payload>(encryptedOnMachine1, restoredKeyOnMachine2);
+  assert(decryptedOnMachine2.count === 348 && decryptedOnMachine2.secret === 'Machine 1 Data', 'Machine 2 recovers 348 records from Machine 1');
   if (failed === 0) {
     console.log('🎉 ALL TESTS PASSED! PassMark core is rock solid.');
   } else {

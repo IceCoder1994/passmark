@@ -32,7 +32,7 @@ import { WebDavClient } from '../../utils/webdav';
 import { setupMasterPassword, unlockVault, isVaultUnlocked } from '../../utils/vault';
 import { performSync } from '../../utils/sync';
 import { parseChromePasswordsCSV, type ParsedCredential } from '../../utils/csv';
-import type { WebDavConfig, SecurityConfig } from '../../types';
+import type { WebDavConfig, SecurityConfig, RemoteMeta } from '../../types';
 import type { SyncOptions } from '../../utils/storage';
 
 // State
@@ -83,11 +83,21 @@ const isImporting = ref(false);
 const importResult = ref<{ success: boolean; message: string; added?: number; updated?: number } | null>(null);
 const isDragging = ref(false);
 
+// Cloud Vault Recovery States
+const cloudVaultDetected = ref(false);
+const cloudMeta = ref<RemoteMeta | null>(null);
+const restoreMasterPassword = ref('');
+const isRestoringCloud = ref(false);
+const restoreError = ref('');
+
 onMounted(async () => {
   webdav.value = await getWebDavConfig();
   security.value = await getSecurityConfig();
   syncOptions.value = await getSyncOptions();
   checkUnlockState();
+  if (webdav.value.url && webdav.value.username && webdav.value.password) {
+    handleTestConnection();
+  }
 });
 
 function checkUnlockState() {
@@ -223,6 +233,13 @@ async function handleTestConnection() {
     const client = new WebDavClient(webdav.value);
     const res = await client.testConnection();
     connectionTestResult.value = res;
+    if (res.hasExistingVault && res.meta) {
+      cloudVaultDetected.value = true;
+      cloudMeta.value = res.meta;
+    } else {
+      cloudVaultDetected.value = false;
+      cloudMeta.value = null;
+    }
   } catch (err: any) {
     connectionTestResult.value = {
       success: false,
@@ -231,6 +248,51 @@ async function handleTestConnection() {
   } finally {
     isTestingConnection.value = false;
   }
+}
+
+// Connect to existing cloud vault and restore
+function handleConnectAndRestoreCloud() {
+  if (!restoreMasterPassword.value) {
+    restoreError.value = '请输入云端保险箱的主密码';
+    return;
+  }
+  if (!cloudMeta.value) return;
+
+  isRestoringCloud.value = true;
+  restoreError.value = '';
+
+  chrome.runtime.sendMessage(
+    {
+      type: 'CONNECT_CLOUD_VAULT',
+      password: restoreMasterPassword.value,
+      remoteMeta: cloudMeta.value,
+    },
+    async (res) => {
+      isRestoringCloud.value = false;
+      if (res && res.success) {
+        security.value = await getSecurityConfig();
+        isUnlocked.value = true;
+        cloudVaultDetected.value = false;
+        restoreMasterPassword.value = '';
+        saveMessage.value = {
+          type: 'success',
+          text: `云端保险箱连接恢复成功！已还原全部数据。${res.message || ''}`,
+        };
+      } else {
+        restoreError.value = res?.message || '恢复失败，请检查主密码是否正确';
+      }
+    }
+  );
+}
+
+// Force pull & sync from WebDAV
+function handleForcePullFromCloud() {
+  isSyncing.value = true;
+  syncResult.value = null;
+  chrome.runtime.sendMessage({ type: 'TRIGGER_SYNC' }, (res) => {
+    isSyncing.value = false;
+    syncResult.value = res;
+  });
 }
 
 // Save all configurations
@@ -494,7 +556,40 @@ async function handleTriggerSync() {
             所有书签和密码均在本地用主密码生成的加密密钥完成加密，密文才会被上传至 WebDAV，即使云盘提供商或黑客也绝对无法读取明文。
           </p>
 
-          <div v-if="!security.isConfigured" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+          <!-- Case A: Cloud Vault Detected on WebDAV -->
+          <div v-if="cloudVaultDetected && cloudMeta" class="p-4 bg-indigo-50 border border-indigo-200 rounded-xl space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2 text-indigo-900 font-bold text-xs">
+                <Cloud class="w-4 h-4 text-indigo-600" />
+                <span>检测到 WebDAV 已存在云端保险箱备份！</span>
+              </div>
+              <span class="text-[10px] text-indigo-500">发现云端加密凭据与书签</span>
+            </div>
+            <p class="text-[11px] text-indigo-700 leading-relaxed">
+              远端网盘已发现历史同步数据（含加密数据）。请输入原保险箱的主密码，一键恢复并还原所有密码和书签到当前浏览器。
+            </p>
+            <div class="flex items-center gap-2 pt-1">
+              <input
+                v-model="restoreMasterPassword"
+                type="password"
+                placeholder="输入该云端保险箱的主密码"
+                class="flex-1 px-3 py-1.5 text-xs bg-white border border-indigo-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                @keyup.enter="handleConnectAndRestoreCloud"
+              />
+              <button
+                type="button"
+                @click="handleConnectAndRestoreCloud"
+                :disabled="isRestoringCloud"
+                class="px-4 py-1.5 text-xs font-semibold rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 transition shadow-xs disabled:opacity-50 whitespace-nowrap"
+              >
+                {{ isRestoringCloud ? '恢复中...' : '一键恢复并拉取数据' }}
+              </button>
+            </div>
+            <p v-if="restoreError" class="text-[11px] text-rose-600 font-medium">{{ restoreError }}</p>
+          </div>
+
+          <!-- Case B: Fresh setup if not configured and no cloud vault -->
+          <div v-else-if="!security.isConfigured" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             <div class="space-y-1.5">
               <label class="block text-xs font-medium text-slate-700">设置主密码 (请牢记，不可找回)</label>
               <div class="relative">
@@ -526,15 +621,30 @@ async function handleTriggerSync() {
             </div>
           </div>
 
-          <div v-else class="bg-slate-50 p-4 rounded-xl flex items-center justify-between border border-slate-200">
-            <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
-                <CheckCircle2 class="w-5 h-5" />
+          <!-- Case C: Already configured -->
+          <div v-else class="space-y-3">
+            <div class="bg-slate-50 p-4 rounded-xl flex items-center justify-between border border-slate-200">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
+                  <CheckCircle2 class="w-5 h-5" />
+                </div>
+                <div>
+                  <p class="text-xs font-semibold text-slate-800">主密码与设备工作密钥处于激活状态</p>
+                  <p class="text-[11px] text-slate-400">已启用无感填充与后台全天候 WebDAV 静默加密同步。</p>
+                </div>
               </div>
-              <div>
-                <p class="text-xs font-semibold text-slate-800">主密码与独立加密库处于激活状态</p>
-                <p class="text-[11px] text-slate-400">日常使用可在弹出窗口快捷输入密码解锁保险箱。</p>
-              </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                @click="handleForcePullFromCloud"
+                :disabled="isSyncing"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition"
+              >
+                <Download class="w-3.5 h-3.5" />
+                {{ isSyncing ? '正在拉取同步...' : '立即从 WebDAV 重新拉取并合并数据' }}
+              </button>
             </div>
           </div>
         </div>

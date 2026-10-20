@@ -35,6 +35,7 @@ export interface SyncBookmarkNode {
 export interface RemoteMeta {
   version: number;
   salt: string;
+  verifier?: string;
   bookmarksLastModified: number;
   vaultLastModified: number;
   updatedBy?: string;
