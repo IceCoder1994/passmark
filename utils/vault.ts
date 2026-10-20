@@ -189,6 +189,52 @@ export async function saveVaultItem(item: Omit<VaultItem, 'id' | 'createdAt' | '
 }
 
 /**
+ * Batch import vault items (e.g. from Chrome CSV)
+ */
+export async function batchImportVaultItems(
+  newItems: Array<Omit<VaultItem, 'id' | 'createdAt' | 'updatedAt'>>
+): Promise<{ added: number; updated: number; total: number }> {
+  const existingItems = await loadVaultFromLocalEncrypted();
+  const now = Date.now();
+  let added = 0;
+  let updated = 0;
+
+  for (const incoming of newItems) {
+    // Check if an item with identical username and URL already exists
+    const matchIndex = existingItems.findIndex((ex) => {
+      const sameUser = (ex.username || '').toLowerCase() === (incoming.username || '').toLowerCase();
+      const sameUrl = ex.urls.some((u) => incoming.urls.includes(u));
+      return sameUser && sameUrl;
+    });
+
+    if (matchIndex !== -1) {
+      existingItems[matchIndex] = {
+        ...existingItems[matchIndex],
+        password: incoming.password,
+        title: incoming.title || existingItems[matchIndex].title,
+        notes: incoming.notes || existingItems[matchIndex].notes,
+        updatedAt: now,
+      };
+      updated++;
+    } else {
+      const id = crypto.randomUUID
+        ? crypto.randomUUID()
+        : `item_${now}_${Math.random().toString(36).slice(2, 8)}`;
+      existingItems.push({
+        ...incoming,
+        id,
+        createdAt: now,
+        updatedAt: now,
+      });
+      added++;
+    }
+  }
+
+  await saveVaultItemsLocal(existingItems);
+  return { added, updated, total: existingItems.length };
+}
+
+/**
  * Delete a vault item by ID
  */
 export async function deleteVaultItem(id: string): Promise<boolean> {

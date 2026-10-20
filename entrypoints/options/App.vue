@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue';
 import {
   Cloud,
   Lock,
+  Unlock,
   RefreshCw,
   CheckCircle2,
   AlertCircle,
@@ -13,6 +14,11 @@ import {
   ShieldCheck,
   Sliders,
   ExternalLink,
+  UploadCloud,
+  FileSpreadsheet,
+  KeyRound,
+  Download,
+  ArrowRight,
 } from 'lucide-vue-next';
 import {
   getWebDavConfig,
@@ -25,6 +31,7 @@ import {
 import { WebDavClient } from '../../utils/webdav';
 import { setupMasterPassword, unlockVault, isVaultUnlocked } from '../../utils/vault';
 import { performSync } from '../../utils/sync';
+import { parseChromePasswordsCSV, type ParsedCredential } from '../../utils/csv';
 import type { WebDavConfig, SecurityConfig } from '../../types';
 import type { SyncOptions } from '../../utils/storage';
 
@@ -63,11 +70,141 @@ const saveMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null
 const isSyncing = ref(false);
 const syncResult = ref<{ success: boolean; message: string } | null>(null);
 
+// CSV Import States
+const isUnlocked = ref(false);
+const unlockModalPassword = ref('');
+const isUnlockingInOptions = ref(false);
+const unlockErrorInOptions = ref('');
+const showUnlockForImport = ref(false);
+
+const csvFile = ref<File | null>(null);
+const parsedCredentials = ref<ParsedCredential[]>([]);
+const isImporting = ref(false);
+const importResult = ref<{ success: boolean; message: string; added?: number; updated?: number } | null>(null);
+const isDragging = ref(false);
+
 onMounted(async () => {
   webdav.value = await getWebDavConfig();
   security.value = await getSecurityConfig();
   syncOptions.value = await getSyncOptions();
+  checkUnlockState();
 });
+
+function checkUnlockState() {
+  chrome.runtime.sendMessage({ type: 'CHECK_UNLOCKED' }, (res) => {
+    if (res && res.unlocked) {
+      isUnlocked.value = true;
+    } else {
+      isUnlocked.value = false;
+    }
+  });
+}
+
+function openChromePasswordSettings() {
+  chrome.tabs.create({ url: 'chrome://password-manager/settings' });
+}
+
+function handleFileDrop(e: DragEvent) {
+  isDragging.value = false;
+  if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+    processFile(e.dataTransfer.files[0]);
+  }
+}
+
+function handleFileInput(e: Event) {
+  const target = e.target as HTMLInputElement;
+  if (target.files && target.files.length > 0) {
+    processFile(target.files[0]);
+  }
+}
+
+function processFile(file: File) {
+  if (!file.name.endsWith('.csv') && file.type !== 'text/csv') {
+    alert('请选择 Chrome 导出的 .csv 格式密码文件');
+    return;
+  }
+  csvFile.value = file;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = reader.result as string;
+    const items = parseChromePasswordsCSV(text);
+    parsedCredentials.value = items;
+    if (items.length === 0) {
+      alert('未能在该 CSV 文件中识别出有效密码记录，请检查是否为 Chrome 导出的密码文件');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function clearCsv() {
+  csvFile.value = null;
+  parsedCredentials.value = [];
+  importResult.value = null;
+}
+
+function handleUnlockForImport() {
+  if (!unlockModalPassword.value) return;
+  isUnlockingInOptions.value = true;
+  unlockErrorInOptions.value = '';
+
+  chrome.runtime.sendMessage({ type: 'UNLOCK_VAULT', password: unlockModalPassword.value }, (res) => {
+    isUnlockingInOptions.value = false;
+    if (res && res.success) {
+      isUnlocked.value = true;
+      showUnlockForImport.value = false;
+      unlockModalPassword.value = '';
+      executeImport();
+    } else {
+      unlockErrorInOptions.value = res?.message || '密码错误';
+    }
+  });
+}
+
+function handleStartImport() {
+  if (parsedCredentials.value.length === 0) return;
+
+  if (!security.value.isConfigured) {
+    alert('请先在上方设置主密码并点击保存');
+    return;
+  }
+
+  if (!isUnlocked.value) {
+    showUnlockForImport.value = true;
+    return;
+  }
+
+  executeImport();
+}
+
+function executeImport() {
+  isImporting.value = true;
+  importResult.value = null;
+
+  chrome.runtime.sendMessage(
+    {
+      type: 'IMPORT_CSV_CREDENTIALS',
+      items: parsedCredentials.value,
+    },
+    (res) => {
+      isImporting.value = false;
+      if (res && res.success) {
+        importResult.value = {
+          success: true,
+          message: `导入成功！已加密存入 ${res.added} 条新密码，更新 ${res.updated} 条，当前密码库共 ${res.total} 条记录，并已自动触发云端同步。`,
+          added: res.added,
+          updated: res.updated,
+        };
+        parsedCredentials.value = [];
+        csvFile.value = null;
+      } else {
+        importResult.value = {
+          success: false,
+          message: res?.message || '导入失败',
+        };
+      }
+    }
+  );
+}
 
 // Test WebDAV connection
 async function handleTestConnection() {
@@ -436,6 +573,182 @@ async function handleTriggerSync() {
               <input type="checkbox" v-model="syncOptions.autoSync" class="sr-only peer" />
               <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
             </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 4: Import Chrome Passwords CSV -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+          <div class="flex items-center space-x-2.5">
+            <FileSpreadsheet class="w-5 h-5 text-indigo-600" />
+            <h2 class="text-base font-semibold text-slate-900">数据导入与迁移 (Chrome 历史密码)</h2>
+          </div>
+          <span class="text-xs text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200 font-medium">支持 CSV 批量导入</span>
+        </div>
+
+        <div class="p-6 space-y-5">
+          <!-- Step by Step instructions -->
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+            <h3 class="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
+              <span>💡</span> 如何从 Chrome 导出已有密码？
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-600">
+              <div class="p-2.5 bg-white rounded-lg border border-slate-100 space-y-1">
+                <span class="font-bold text-indigo-600 text-[11px]">步骤 1</span>
+                <p>打开 Chrome 密码管理设置：</p>
+                <button
+                  type="button"
+                  @click="openChromePasswordSettings"
+                  class="mt-1 inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                  <ExternalLink class="w-3 h-3" /> 前往密码设置
+                </button>
+              </div>
+
+              <div class="p-2.5 bg-white rounded-lg border border-slate-100 space-y-1">
+                <span class="font-bold text-indigo-600 text-[11px]">步骤 2</span>
+                <p>在页面底部找到<b>“导出密码”</b>，点击<b>“下载文件”</b>，输入电脑锁屏密码后保存为 <code>.csv</code> 文件。</p>
+              </div>
+
+              <div class="p-2.5 bg-white rounded-lg border border-slate-100 space-y-1">
+                <span class="font-bold text-indigo-600 text-[11px]">步骤 3</span>
+                <p>将导出的 <code>.csv</code> 文件上传到下方，系统将自动加密并推送到 WebDAV。</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- File Dropzone -->
+          <div
+            @dragover.prevent="isDragging = true"
+            @dragleave.prevent="isDragging = false"
+            @drop.prevent="handleFileDrop"
+            :class="[
+              'border-2 border-dashed rounded-2xl p-6 text-center transition flex flex-col items-center justify-center cursor-pointer',
+              isDragging ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300 bg-slate-50/50'
+            ]"
+            @click="($refs.fileInput as HTMLInputElement)?.click()"
+          >
+            <input
+              ref="fileInput"
+              type="file"
+              accept=".csv,text/csv"
+              class="hidden"
+              @change="handleFileInput"
+            />
+            <div class="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-2">
+              <UploadCloud class="w-6 h-6" />
+            </div>
+            <p class="text-xs font-semibold text-slate-800">
+              {{ csvFile ? csvFile.name : '点击或将 Chrome 密码 CSV 文件拖拽到此处' }}
+            </p>
+            <p class="text-[11px] text-slate-400 mt-1">支持 Chrome、Edge、Firefox 导出的密码 CSV 格式</p>
+          </div>
+
+          <!-- Parsed summary preview -->
+          <div v-if="parsedCredentials.length > 0" class="p-4 bg-emerald-50 rounded-xl border border-emerald-200 space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <CheckCircle2 class="w-4 h-4 text-emerald-600" />
+                <span class="text-xs font-semibold text-emerald-900">
+                  成功解析出 {{ parsedCredentials.length }} 条密码记录！
+                </span>
+              </div>
+              <button
+                type="button"
+                @click="clearCsv"
+                class="text-xs text-slate-400 hover:text-slate-600"
+              >
+                重新选择
+              </button>
+            </div>
+
+            <!-- Preview sample items -->
+            <div class="space-y-1.5 max-h-36 overflow-y-auto">
+              <div
+                v-for="(item, idx) in parsedCredentials.slice(0, 5)"
+                :key="idx"
+                class="bg-white/80 px-3 py-1.5 rounded-lg border border-emerald-100 text-[11px] flex items-center justify-between"
+              >
+                <span class="font-medium text-slate-800 truncate mr-2">{{ item.title }} ({{ item.username }})</span>
+                <span class="font-mono text-slate-400">••••••••</span>
+              </div>
+              <div v-if="parsedCredentials.length > 5" class="text-[10px] text-emerald-700 italic text-center">
+                ... 还有 {{ parsedCredentials.length - 5 }} 条记录
+              </div>
+            </div>
+
+            <div class="pt-2 flex justify-end">
+              <button
+                type="button"
+                @click="handleStartImport"
+                :disabled="isImporting"
+                class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 transition shadow-sm disabled:opacity-50"
+              >
+                <KeyRound class="w-3.5 h-3.5" />
+                {{ isImporting ? '加密导入中...' : `确认导入这 ${parsedCredentials.length} 条密码并加密同步` }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Import Result Toast -->
+          <div
+            v-if="importResult"
+            :class="[
+              'p-4 rounded-xl flex items-center gap-3 text-xs transition',
+              importResult.success ? 'bg-indigo-50 text-indigo-900 border border-indigo-200' : 'bg-rose-50 text-rose-900 border border-rose-200'
+            ]"
+          >
+            <CheckCircle2 v-if="importResult.success" class="w-4 h-4 text-indigo-600 flex-shrink-0" />
+            <AlertCircle v-else class="w-4 h-4 text-rose-600 flex-shrink-0" />
+            <span>{{ importResult.message }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Unlock Modal for Import if locked -->
+      <div
+        v-if="showUnlockForImport"
+        class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4"
+      >
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-xl border border-slate-200">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200">
+              <Lock class="w-5 h-5" />
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-slate-900">请输入主密码</h3>
+              <p class="text-xs text-slate-500">导入前需要解锁本地加密密钥以加密存储</p>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <input
+              v-model="unlockModalPassword"
+              type="password"
+              placeholder="输入你的主密码"
+              @keyup.enter="handleUnlockForImport"
+              class="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600"
+            />
+            <p v-if="unlockErrorInOptions" class="text-xs text-rose-600 font-medium">{{ unlockErrorInOptions }}</p>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              @click="showUnlockForImport = false"
+              class="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              @click="handleUnlockForImport"
+              :disabled="isUnlockingInOptions"
+              class="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition disabled:opacity-50"
+            >
+              {{ isUnlockingInOptions ? '解锁中...' : '解锁并继续导入' }}
+            </button>
           </div>
         </div>
       </div>

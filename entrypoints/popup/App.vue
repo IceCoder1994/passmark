@@ -596,8 +596,23 @@ function formatRelativeTime(timestamp: number | null): string {
             </div>
           </div>
 
-          <div v-if="filteredVaultItems.length === 0" class="py-8 text-center text-xs text-slate-400">
-            暂无匹配的密码记录
+          <div v-if="filteredVaultItems.length === 0" class="py-6 text-center text-xs text-slate-400 space-y-3">
+            <p v-if="searchQuery">未找到与 "{{ searchQuery }}" 匹配的密码记录</p>
+            <div v-else-if="vaultItems.length === 0" class="p-3.5 bg-indigo-50 rounded-xl border border-indigo-100 text-left space-y-2">
+              <p class="font-semibold text-indigo-900 text-xs flex items-center gap-1.5">
+                <span>💡</span> 还没有密码记录？
+              </p>
+              <p class="text-[11px] text-indigo-700 leading-relaxed">
+                可将 Chrome 历史保存的密码导出为 CSV，一键端到端加密导入 PassMark 并同步到 WebDAV。
+              </p>
+              <button
+                @click="openOptionsPage"
+                class="w-full py-1.5 px-3 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition shadow-2xs"
+              >
+                前往设置一键导入 (CSV)
+              </button>
+            </div>
+            <p v-else>暂无匹配的密码记录</p>
           </div>
         </div>
       </div>

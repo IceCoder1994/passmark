@@ -9,6 +9,7 @@ import {
   lockVault,
   loadVaultFromLocalEncrypted,
   saveVaultItem,
+  batchImportVaultItems,
   matchVaultItemsForUrl,
   getActiveCryptoKey,
 } from '../utils/vault';
@@ -134,6 +135,24 @@ export default defineBackground(() => {
             sendResponse({ success: true, item: saved });
           } catch (e: any) {
             sendResponse({ success: false, message: e.message });
+          }
+          break;
+        }
+
+        case 'IMPORT_CSV_CREDENTIALS': {
+          if (!isVaultUnlocked()) {
+            sendResponse({ success: false, message: '保险箱已锁定，请先输入主密码解锁' });
+            return;
+          }
+          try {
+            const res = await batchImportVaultItems(request.items);
+            const opts = await getSyncOptions();
+            if (opts.autoSync) {
+              performSync().catch(console.error);
+            }
+            sendResponse({ success: true, ...res });
+          } catch (err: any) {
+            sendResponse({ success: false, message: err.message || '导入失败' });
           }
           break;
         }

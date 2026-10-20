@@ -17,6 +17,7 @@ import {
   matchVaultItemsForUrl,
   mergeVaultItems,
 } from '../utils/vault';
+import { parseChromePasswordsCSV, parseCSV } from '../utils/csv';
 import { WebDavClient } from '../utils/webdav';
 import type { SyncBookmarkNode, VaultItem } from '../types';
 
@@ -169,6 +170,21 @@ async function runTests() {
   assert((dav as any).config.url === 'https://dav.jianguoyun.com/dav/', 'URL has trailing slash');
   assert((dav as any).config.syncDir === '/custom-passmark/', 'SyncDir has leading and trailing slashes');
   assert((dav as any).getFullUrl('bookmarks.enc') === 'https://dav.jianguoyun.com/dav/custom-passmark/bookmarks.enc', 'Full URL is correctly composed without duplicate slashes');
+
+  // 7. Test Chrome Passwords CSV Parsing
+  console.log('\n[7] Testing Chrome Passwords CSV Parser:');
+  const sampleChromeCSV = `name,url,username,password,note
+Google,https://accounts.google.com/signin,alice@gmail.com,"P@ss,word""123",Work Account
+GitHub,https://github.com/login,alice,github_token_xyz,`;
+
+  const parsedItems = parseChromePasswordsCSV(sampleChromeCSV);
+  assert(parsedItems.length === 2, `Parsed exactly 2 rows (got ${parsedItems.length})`);
+  assert(parsedItems[0].title === 'Google', 'Row 1 title is Google');
+  assert(parsedItems[0].urls[0] === 'accounts.google.com', 'Row 1 URL extracted hostname accounts.google.com');
+  assert(parsedItems[0].username === 'alice@gmail.com', 'Row 1 username matches');
+  assert(parsedItems[0].password === 'P@ss,word"123', 'Row 1 password correctly unescapes comma and quotes');
+  assert(parsedItems[0].notes === 'Work Account', 'Row 1 notes match');
+  assert(parsedItems[1].title === 'GitHub' && parsedItems[1].password === 'github_token_xyz', 'Row 2 parsed correctly');
 
   console.log(`\n========================================`);
   if (failed === 0) {
