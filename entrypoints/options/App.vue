@@ -247,8 +247,14 @@ async function handleSaveSettings() {
       if (masterPassword.value !== confirmMasterPassword.value) {
         throw new Error('两次输入的主密码不一致');
       }
-      await setupMasterPassword(masterPassword.value);
+      await new Promise<void>((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'SETUP_MASTER_PASSWORD', password: masterPassword.value }, (res) => {
+          if (res && res.success) resolve();
+          else reject(new Error('主密码初始化失败'));
+        });
+      });
       security.value = await getSecurityConfig();
+      isUnlocked.value = true;
     }
 
     // 2. Save WebDAV and sync preferences

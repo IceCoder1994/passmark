@@ -27,9 +27,6 @@ import {
   getWebDavConfig,
 } from '../../utils/storage';
 import {
-  loadVaultFromLocalEncrypted,
-  saveVaultItem,
-  deleteVaultItem,
   generatePassword,
   matchVaultItemsForUrl,
 } from '../../utils/vault';
@@ -101,11 +98,13 @@ async function refreshInitialState() {
   const security = await getSecurityConfig();
   isConfigured.value = security.isConfigured;
 
-  // Check background unlock state
-  chrome.runtime.sendMessage({ type: 'CHECK_UNLOCKED' }, async (res) => {
+  // Check background unlock state and fetch decrypted items directly from background
+  chrome.runtime.sendMessage({ type: 'GET_VAULT_ITEMS' }, (res) => {
     if (res && res.unlocked) {
       isUnlocked.value = true;
-      await loadData();
+      vaultItems.value = res.items || [];
+    } else {
+      isUnlocked.value = false;
     }
   });
 
@@ -143,7 +142,7 @@ async function handleUnlock() {
     if (res && res.success) {
       isUnlocked.value = true;
       masterPasswordInput.value = '';
-      await loadData();
+      loadData();
     } else {
       unlockError.value = res?.message || '密码错误，解锁失败';
     }
@@ -157,9 +156,16 @@ function handleLock() {
   });
 }
 
-async function loadData() {
-  vaultItems.value = await loadVaultFromLocalEncrypted();
-  syncState.value = await getSyncState();
+function loadData() {
+  chrome.runtime.sendMessage({ type: 'GET_VAULT_ITEMS' }, (res) => {
+    if (res && res.items) {
+      vaultItems.value = res.items;
+      isUnlocked.value = res.unlocked;
+    }
+  });
+  getSyncState().then((state) => {
+    syncState.value = state;
+  });
 }
 
 // Trigger Manual Sync
@@ -257,23 +263,36 @@ async function handleSaveItem() {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  await saveVaultItem({
-    id: formData.value.id,
-    title: formData.value.title,
-    username: formData.value.username,
-    password: formData.value.password,
-    urls,
-    notes: formData.value.notes,
-  });
-
-  showModal.value = false;
-  await loadData();
+  chrome.runtime.sendMessage(
+    {
+      type: 'SAVE_VAULT_ITEM',
+      item: {
+        id: formData.value.id,
+        title: formData.value.title,
+        username: formData.value.username,
+        password: formData.value.password,
+        urls,
+        notes: formData.value.notes,
+      },
+    },
+    (res) => {
+      if (res && res.success) {
+        showModal.value = false;
+        loadData();
+      } else {
+        alert(res?.message || '保存失败');
+      }
+    }
+  );
 }
 
 async function handleDeleteItem(id: string) {
   if (confirm('确认删除该账号密码？')) {
-    await deleteVaultItem(id);
-    await loadData();
+    chrome.runtime.sendMessage({ type: 'DELETE_VAULT_ITEM', id }, (res) => {
+      if (res && res.success) {
+        loadData();
+      }
+    });
   }
 }
 

@@ -7,8 +7,10 @@ import {
   isVaultUnlocked,
   unlockVault,
   lockVault,
+  setupMasterPassword,
   loadVaultFromLocalEncrypted,
   saveVaultItem,
+  deleteVaultItem,
   batchImportVaultItems,
   matchVaultItemsForUrl,
   getActiveCryptoKey,
@@ -85,6 +87,12 @@ export default defineBackground(() => {
           break;
         }
 
+        case 'SETUP_MASTER_PASSWORD': {
+          const ok = await setupMasterPassword(request.password);
+          sendResponse({ success: ok });
+          break;
+        }
+
         case 'UNLOCK_VAULT': {
           const res = await unlockVault(request.password);
           sendResponse(res);
@@ -153,6 +161,52 @@ export default defineBackground(() => {
             sendResponse({ success: true, ...res });
           } catch (err: any) {
             sendResponse({ success: false, message: err.message || '导入失败' });
+          }
+          break;
+        }
+
+        case 'GET_VAULT_ITEMS': {
+          if (!isVaultUnlocked()) {
+            sendResponse({ items: [], unlocked: false });
+            return;
+          }
+          const items = await loadVaultFromLocalEncrypted();
+          sendResponse({ items, unlocked: true });
+          break;
+        }
+
+        case 'SAVE_VAULT_ITEM': {
+          if (!isVaultUnlocked()) {
+            sendResponse({ success: false, message: '请先在插件中解锁保险箱' });
+            return;
+          }
+          try {
+            const saved = await saveVaultItem(request.item);
+            const opts = await getSyncOptions();
+            if (opts.autoSync) {
+              performSync().catch(console.error);
+            }
+            sendResponse({ success: true, item: saved });
+          } catch (e: any) {
+            sendResponse({ success: false, message: e.message });
+          }
+          break;
+        }
+
+        case 'DELETE_VAULT_ITEM': {
+          if (!isVaultUnlocked()) {
+            sendResponse({ success: false, message: '请先在插件中解锁保险箱' });
+            return;
+          }
+          try {
+            const ok = await deleteVaultItem(request.id);
+            const opts = await getSyncOptions();
+            if (opts.autoSync) {
+              performSync().catch(console.error);
+            }
+            sendResponse({ success: ok });
+          } catch (e: any) {
+            sendResponse({ success: false, message: e.message });
           }
           break;
         }
