@@ -248,27 +248,61 @@ export async function deleteVaultItem(id: string): Promise<boolean> {
 }
 
 /**
+ * Extract root / second-level domain (e.g. 'github.com', 'google.com', 'taobao.com')
+ */
+export function extractBaseDomain(raw: string): string {
+  if (!raw) return '';
+  let host = raw.toLowerCase().trim();
+  try {
+    if (host.includes('://')) {
+      host = new URL(host).hostname.toLowerCase();
+    }
+  } catch {}
+  // remove port and path
+  host = host.split(':')[0].split('/')[0];
+
+  const parts = host.split('.').filter(Boolean);
+  if (parts.length <= 2) return host;
+
+  // Handle common multi-level TLDs
+  const commonDoubleExtensions = ['com.cn', 'net.cn', 'org.cn', 'gov.cn', 'co.uk', 'org.uk', 'com.hk', 'edu.cn'];
+  const lastTwo = parts.slice(-2).join('.');
+  if (commonDoubleExtensions.includes(lastTwo) && parts.length >= 3) {
+    return parts.slice(-3).join('.');
+  }
+
+  return parts.slice(-2).join('.');
+}
+
+/**
  * Find matching vault items for a given URL / hostname
  */
 export function matchVaultItemsForUrl(items: VaultItem[], targetUrl: string): VaultItem[] {
-  let hostname = '';
+  if (!targetUrl) return [];
+  const targetBase = extractBaseDomain(targetUrl);
+  let targetHost = '';
   try {
-    const parsed = new URL(targetUrl.includes('://') ? targetUrl : `https://${targetUrl}`);
-    hostname = parsed.hostname.toLowerCase();
+    targetHost = new URL(targetUrl.includes('://') ? targetUrl : `https://${targetUrl}`).hostname.toLowerCase();
   } catch {
-    hostname = targetUrl.toLowerCase();
+    targetHost = targetUrl.toLowerCase();
   }
 
   return items.filter((item) => {
     return item.urls.some((u) => {
+      if (!u) return false;
+      const uBase = extractBaseDomain(u);
       let uHost = '';
       try {
-        const p = new URL(u.includes('://') ? u : `https://${u}`);
-        uHost = p.hostname.toLowerCase();
+        uHost = new URL(u.includes('://') ? u : `https://${u}`).hostname.toLowerCase();
       } catch {
         uHost = u.toLowerCase();
       }
-      return hostname === uHost || hostname.endsWith(`.${uHost}`) || uHost.endsWith(`.${hostname}`);
+      return (
+        targetHost === uHost ||
+        (targetBase && uBase && targetBase === uBase) ||
+        targetHost.endsWith(`.${uHost}`) ||
+        uHost.endsWith(`.${targetHost}`)
+      );
     });
   });
 }

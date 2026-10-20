@@ -224,6 +224,26 @@ async function copyText(text: string, fieldId: string) {
   }, 1800);
 }
 
+function fillItemToActiveTab(item: VaultItem) {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (tabs[0] && tabs[0].id) {
+      chrome.tabs.sendMessage(
+        tabs[0].id,
+        { type: 'FILL_CREDENTIAL_INTO_PAGE', item },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            alert('请先按 F5 刷新当前网页后再试（插件更新后需刷新已有网页以激活脚本）');
+          } else if (res && res.success) {
+            window.close(); // Close popup after filling
+          } else {
+            alert('未能在当前页面找到输入框，或该网站表单已被跨域隔离');
+          }
+        }
+      );
+    }
+  });
+}
+
 // Open Add modal
 function openAddModal() {
   isEditing.value = false;
@@ -555,6 +575,13 @@ function formatRelativeTime(timestamp: number | null): string {
               </div>
               <div class="flex items-center space-x-1" @click.stop>
                 <button
+                  @click="fillItemToActiveTab(item)"
+                  title="一键填充到当前页面"
+                  class="p-1 text-indigo-600 hover:bg-indigo-50 rounded transition"
+                >
+                  <Sparkles class="w-3.5 h-3.5" />
+                </button>
+                <button
                   @click="copyText(item.username, `user_${item.id}`)"
                   title="复制用户名"
                   class="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition"
@@ -598,19 +625,27 @@ function formatRelativeTime(timestamp: number | null): string {
               </div>
 
               <!-- Action buttons -->
-              <div class="flex items-center justify-end space-x-2 pt-1">
+              <div class="flex items-center justify-between pt-1">
                 <button
-                  @click="openEditModal(item)"
-                  class="inline-flex items-center gap-1 text-[11px] text-slate-600 hover:text-indigo-600"
+                  @click="fillItemToActiveTab(item)"
+                  class="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-[11px] font-medium transition shadow-2xs"
                 >
-                  <Edit3 class="w-3 h-3" /> 编辑
+                  <Sparkles class="w-3 h-3" /> 一键填充
                 </button>
-                <button
-                  @click="handleDeleteItem(item.id)"
-                  class="inline-flex items-center gap-1 text-[11px] text-rose-500 hover:text-rose-700"
-                >
-                  <Trash2 class="w-3 h-3" /> 删除
-                </button>
+                <div class="flex items-center space-x-2">
+                  <button
+                    @click="openEditModal(item)"
+                    class="inline-flex items-center gap-1 text-[11px] text-slate-600 hover:text-indigo-600"
+                  >
+                    <Edit3 class="w-3 h-3" /> 编辑
+                  </button>
+                  <button
+                    @click="handleDeleteItem(item.id)"
+                    class="inline-flex items-center gap-1 text-[11px] text-rose-500 hover:text-rose-700"
+                  >
+                    <Trash2 class="w-3 h-3" /> 删除
+                  </button>
+                </div>
               </div>
             </div>
           </div>

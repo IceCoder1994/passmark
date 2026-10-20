@@ -1,125 +1,174 @@
-
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_idle',
   main() {
-    initAutofillAndCapture();
+    initAutofillEngine();
   },
 });
 
-function initAutofillAndCapture() {
+let matchedItems: any[] = [];
+let activeDropdown: HTMLElement | null = null;
+let currentActiveInput: HTMLInputElement | null = null;
+
+function initAutofillEngine() {
   const currentUrl = window.location.href;
 
-  // 1. Fetch matching credentials for this website
+  // 1. Fetch matching credentials from background for this URL
   chrome.runtime.sendMessage(
     { type: 'GET_MATCHING_CREDENTIALS', url: currentUrl },
     (response) => {
       if (chrome.runtime.lastError || !response || !response.items || response.items.length === 0) {
         return;
       }
-      setupAutofillDropdowns(response.items);
+      matchedItems = response.items;
+
+      // Scan existing inputs
+      scanAndAttachInputs();
+
+      // Setup MutationObserver to scan dynamically injected forms (modals, SPAs)
+      setupDynamicObserver();
     }
   );
 
-  // 2. Setup form submission listener to prompt saving new passwords
+  // 2. Setup direct fill listener from Popup
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === 'FILL_CREDENTIAL_INTO_PAGE') {
+      const success = fillPageWithCredential(request.item);
+      sendResponse({ success });
+    }
+  });
+
+  // 3. Setup form submission observer to prompt saving new passwords
   setupCredentialCapture();
 }
 
 /**
- * Setup autofill UI next to password / username fields
+ * Scan DOM for username / email and password inputs
  */
-function setupAutofillDropdowns(items: any[]) {
-  const passwordInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]'));
+function scanAndAttachInputs() {
+  if (matchedItems.length === 0) return;
 
-  for (const pwdInput of passwordInputs) {
-    if (pwdInput.dataset.passmarkHandled) continue;
-    pwdInput.dataset.passmarkHandled = 'true';
+  const inputs = Array.from(
+    document.querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"]):not([type="button"])')
+  );
 
-    // Locate related username input (closest preceding input[type="text"|"email"] in the same form or DOM)
-    const form = pwdInput.form || pwdInput.closest('form');
-    let usernameInput: HTMLInputElement | null = null;
+  for (const input of inputs) {
+    if (input.dataset.passmarkAttached) continue;
 
-    if (form) {
-      const inputs = Array.from(form.querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])'));
-      usernameInput = inputs.find((inp) => {
-        const idName = (inp.id + inp.name + inp.type + inp.autocomplete).toLowerCase();
-        return idName.includes('user') || idName.includes('mail') || idName.includes('login') || idName.includes('account');
-      }) || inputs[0] || null;
+    const isPassword = input.type === 'password';
+    const isUsername = isLikelyUsernameField(input);
+
+    if (isPassword || isUsername) {
+      input.dataset.passmarkAttached = 'true';
+      attachInputEvents(input);
     }
-
-    // Attach click/focus listener to show floating dropdown
-    const targetInput = usernameInput || pwdInput;
-    let dropdown: HTMLDivElement | null = null;
-
-    targetInput.addEventListener('focus', () => {
-      if (dropdown) return;
-      dropdown = createAutofillMenu(targetInput, items, (selectedItem) => {
-        if (usernameInput) {
-          fillInput(usernameInput, selectedItem.username);
-        }
-        fillInput(pwdInput, selectedItem.password);
-        removeDropdown();
-      });
-      document.body.appendChild(dropdown);
-    });
-
-    const removeDropdown = () => {
-      if (dropdown) {
-        dropdown.remove();
-        dropdown = null;
-      }
-    };
-
-    // Close dropdown on outside click
-    document.addEventListener('click', (e) => {
-      if (dropdown && !dropdown.contains(e.target as Node) && e.target !== targetInput && e.target !== pwdInput) {
-        removeDropdown();
-      }
-    });
   }
 }
 
-function fillInput(el: HTMLInputElement, value: string) {
-  el.value = value;
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
+function isLikelyUsernameField(input: HTMLInputElement): boolean {
+  const type = (input.type || '').toLowerCase();
+  if (type === 'email') return true;
+  if (type !== 'text') return false;
+
+  const idName = ((input.id || '') + ' ' + (input.name || '') + ' ' + (input.placeholder || '') + ' ' + (input.autocomplete || '')).toLowerCase();
+  return (
+    idName.includes('user') ||
+    idName.includes('mail') ||
+    idName.includes('login') ||
+    idName.includes('account') ||
+    idName.includes('phone') ||
+    idName.includes('账号') ||
+    idName.includes('用户名') ||
+    idName.includes('邮箱')
+  );
 }
 
-function createAutofillMenu(targetEl: HTMLElement, items: any[], onSelect: (item: any) => void): HTMLDivElement {
-  const rect = targetEl.getBoundingClientRect();
+/**
+ * Setup input focus and click events to show autofill dropdown
+ */
+function attachInputEvents(input: HTMLInputElement) {
+  input.addEventListener('focus', () => {
+    showDropdown(input);
+  });
+
+  input.addEventListener('click', () => {
+    showDropdown(input);
+  });
+}
+
+/**
+ * Setup MutationObserver with debouncing for dynamic content
+ */
+function setupDynamicObserver() {
+  let debounceTimer: any = null;
+  const observer = new MutationObserver(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      scanAndAttachInputs();
+    }, 200);
+  });
+
+  observer.observe(document.body || document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+}
+
+/**
+ * Show floating autofill dropdown menu
+ */
+function showDropdown(input: HTMLInputElement) {
+  if (matchedItems.length === 0) return;
+  removeDropdown();
+
+  currentActiveInput = input;
+  const rect = input.getBoundingClientRect();
+
+  // If input is not visible or offscreen, skip
+  if (rect.width === 0 || rect.height === 0 || rect.top < 0) return;
+
   const menu = document.createElement('div');
   menu.id = 'passmark-autofill-menu';
   menu.style.cssText = `
     position: fixed;
-    top: ${rect.bottom + window.scrollY + 4}px;
-    left: ${rect.left + window.scrollX}px;
+    top: ${rect.bottom + 4}px;
+    left: ${Math.max(8, rect.left)}px;
     z-index: 2147483647;
     background: #ffffff;
     border: 1px solid #e2e8f0;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-    border-radius: 8px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+    border-radius: 10px;
     padding: 6px;
     min-width: 220px;
-    font-family: system-ui, -apple-system, sans-serif;
+    max-width: 320px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 13px;
+    animation: passmarkFadeIn 0.15s ease-out;
   `;
 
+  // Header
   const header = document.createElement('div');
   header.style.cssText = `
     padding: 4px 8px;
     font-size: 11px;
     font-weight: 600;
-    color: #6366f1;
+    color: #4f46e5;
     border-bottom: 1px solid #f1f5f9;
     margin-bottom: 4px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: space-between;
   `;
-  header.textContent = '🔑 PassMark 账号填充';
+  header.innerHTML = `
+    <span style="display: flex; align-items: center; gap: 4px;">
+      <span>🔑</span> PassMark 账号填充
+    </span>
+    <span style="font-size: 10px; color: #94a3b8; font-weight: normal;">${matchedItems.length} 个账号</span>
+  `;
   menu.appendChild(header);
 
-  for (const item of items) {
+  // List of matching items
+  for (const item of matchedItems) {
     const itemEl = document.createElement('div');
     itemEl.style.cssText = `
       padding: 6px 8px;
@@ -127,32 +176,119 @@ function createAutofillMenu(targetEl: HTMLElement, items: any[], onSelect: (item
       cursor: pointer;
       display: flex;
       flex-direction: column;
-      transition: background 0.15s ease;
+      transition: background 0.12s ease;
     `;
     itemEl.innerHTML = `
-      <span style="font-weight: 600; color: #1e293b;">${escapeHtml(item.username || item.title)}</span>
-      <span style="font-size: 11px; color: #64748b;">${escapeHtml(item.title)}</span>
+      <div style="font-weight: 600; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        ${escapeHtml(item.username || item.title)}
+      </div>
+      <div style="font-size: 11px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        ${escapeHtml(item.title)}
+      </div>
     `;
 
     itemEl.addEventListener('mouseenter', () => {
-      itemEl.style.background = '#f1f5f9';
+      itemEl.style.background = '#eef2ff';
     });
     itemEl.addEventListener('mouseleave', () => {
       itemEl.style.background = 'transparent';
     });
+
     itemEl.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      onSelect(item);
+      fillPageWithCredential(item, input);
+      removeDropdown();
     });
 
     menu.appendChild(itemEl);
   }
 
-  return menu;
+  document.body.appendChild(menu);
+  activeDropdown = menu;
+
+  // Reposition on scroll/resize or dismiss on outside click
+  const closeHandler = (e: MouseEvent) => {
+    if (activeDropdown && !activeDropdown.contains(e.target as Node) && e.target !== input) {
+      removeDropdown();
+      document.removeEventListener('mousedown', closeHandler);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('mousedown', closeHandler);
+  }, 10);
+}
+
+function removeDropdown() {
+  if (activeDropdown) {
+    activeDropdown.remove();
+    activeDropdown = null;
+  }
 }
 
 /**
- * Capture login submissions and ask to save
+ * Fill username and password into page
+ */
+function fillPageWithCredential(item: any, triggerInput?: HTMLInputElement): boolean {
+  const form = triggerInput?.form || triggerInput?.closest('form') || document.body;
+
+  // 1. Find password field
+  const pwdInput =
+    (triggerInput?.type === 'password' ? triggerInput : null) ||
+    form.querySelector<HTMLInputElement>('input[type="password"]') ||
+    document.querySelector<HTMLInputElement>('input[type="password"]');
+
+  // 2. Find username field
+  let usernameInput =
+    (triggerInput && isLikelyUsernameField(triggerInput) ? triggerInput : null) ||
+    null;
+
+  if (!usernameInput && pwdInput) {
+    const inputs = Array.from(
+      (pwdInput.form || form).querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
+    );
+    usernameInput = inputs.find(isLikelyUsernameField) || inputs[0] || null;
+  }
+
+  let filled = false;
+
+  if (usernameInput && item.username) {
+    setInputValue(usernameInput, item.username);
+    filled = true;
+  }
+
+  if (pwdInput && item.password) {
+    setInputValue(pwdInput, item.password);
+    filled = true;
+  }
+
+  if (filled) {
+    showNotification(`已填充 ${item.username || item.title}`);
+  }
+
+  return filled;
+}
+
+/**
+ * Set value and dispatch standard + React synthetic events
+ */
+function setInputValue(input: HTMLInputElement, value: string) {
+  input.focus();
+
+  // Handle React input tracker
+  const tracker = (input as any)._valueTracker;
+  if (tracker) {
+    tracker.setValue('');
+  }
+
+  input.value = value;
+
+  input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+  input.blur();
+}
+
+/**
+ * Setup capture on login form submit
  */
 function setupCredentialCapture() {
   document.addEventListener('submit', (e) => {
@@ -162,11 +298,10 @@ function setupCredentialCapture() {
     const pwdInput = form.querySelector<HTMLInputElement>('input[type="password"]');
     if (!pwdInput || !pwdInput.value) return;
 
-    const inputs = Array.from(form.querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])'));
-    const usernameInput = inputs.find((inp) => {
-      const idName = (inp.id + inp.name + inp.type).toLowerCase();
-      return idName.includes('user') || idName.includes('mail') || idName.includes('login') || idName.includes('account');
-    }) || inputs[0] || null;
+    const inputs = Array.from(
+      form.querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
+    );
+    const usernameInput = inputs.find(isLikelyUsernameField) || inputs[0] || null;
 
     const username = usernameInput ? usernameInput.value.trim() : '';
     const password = pwdInput.value;
@@ -191,20 +326,19 @@ function showSavePrompt(username: string, pass: string, hostname: string, pageTi
     background: #ffffff;
     border: 1px solid #cbd5e1;
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 14px 16px;
     font-family: system-ui, -apple-system, sans-serif;
     font-size: 13px;
     color: #1e293b;
     max-width: 320px;
-    animation: passmarkSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   `;
 
   banner.innerHTML = `
     <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
       <span>🔒</span> 保存密码到 PassMark？
     </div>
-    <div style="font-size: 12px; color: #64748b; margin-bottom: 10px;">
+    <div style="font-size: 12px; color: #64748b; margin-bottom: 12px;">
       是否将 <b>${escapeHtml(username)}</b> (${escapeHtml(hostname)}) 的密码加密保存并同步到云端？
     </div>
     <div style="display: flex; justify-content: flex-end; gap: 8px;">
@@ -237,7 +371,6 @@ function showSavePrompt(username: string, pass: string, hostname: string, pageTi
     );
   });
 
-  // Auto dismiss after 15s
   setTimeout(() => {
     if (banner.parentElement) banner.remove();
   }, 15000);
@@ -253,8 +386,10 @@ function showNotification(msg: string) {
     background: #10b981;
     color: #fff;
     padding: 8px 14px;
-    border-radius: 6px;
+    border-radius: 8px;
     font-size: 13px;
+    font-weight: 500;
+    font-family: system-ui, -apple-system, sans-serif;
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   `;
   toast.textContent = msg;
