@@ -212,8 +212,69 @@ const filteredVaultItems = computed(() => {
   );
 });
 
+const isIdentityVerified = ref(false);
+const showAuthModal = ref(false);
+const authPasswordInput = ref('');
+const authError = ref('');
+const isAuthorizing = ref(false);
+const pendingAuthAction = ref<{ type: 'view' | 'copy'; id: string; text?: string } | null>(null);
+
+function handleRequestViewPassword(id: string) {
+  if (visiblePasswords.value[id]) {
+    visiblePasswords.value[id] = false;
+    return;
+  }
+  if (isIdentityVerified.value) {
+    visiblePasswords.value[id] = true;
+    return;
+  }
+  pendingAuthAction.value = { type: 'view', id };
+  authPasswordInput.value = '';
+  authError.value = '';
+  showAuthModal.value = true;
+}
+
+function handleRequestCopyPassword(item: VaultItem) {
+  if (isIdentityVerified.value) {
+    copyText(item.password, `pwd_${item.id}`);
+    return;
+  }
+  pendingAuthAction.value = { type: 'copy', id: item.id, text: item.password };
+  authPasswordInput.value = '';
+  authError.value = '';
+  showAuthModal.value = true;
+}
+
+function handleConfirmAuth() {
+  if (!authPasswordInput.value) return;
+  isAuthorizing.value = true;
+  authError.value = '';
+
+  chrome.runtime.sendMessage(
+    { type: 'VERIFY_MASTER_PASSWORD', password: authPasswordInput.value },
+    (res) => {
+      isAuthorizing.value = false;
+      if (res && res.valid) {
+        isIdentityVerified.value = true;
+        showAuthModal.value = false;
+
+        if (pendingAuthAction.value) {
+          if (pendingAuthAction.value.type === 'view') {
+            visiblePasswords.value[pendingAuthAction.value.id] = true;
+          } else if (pendingAuthAction.value.type === 'copy' && pendingAuthAction.value.text) {
+            copyText(pendingAuthAction.value.text, `pwd_${pendingAuthAction.value.id}`);
+          }
+          pendingAuthAction.value = null;
+        }
+      } else {
+        authError.value = '主密码错误，核验失败';
+      }
+    }
+  );
+}
+
 function togglePasswordVisibility(id: string) {
-  visiblePasswords.value[id] = !visiblePasswords.value[id];
+  handleRequestViewPassword(id);
 }
 
 async function copyText(text: string, fieldId: string) {
@@ -590,7 +651,7 @@ function formatRelativeTime(timestamp: number | null): string {
                   <Copy v-else class="w-3.5 h-3.5" />
                 </button>
                 <button
-                  @click="copyText(item.password, `pwd_${item.id}`)"
+                  @click="handleRequestCopyPassword(item)"
                   title="复制密码"
                   class="p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded transition"
                 >
@@ -779,6 +840,52 @@ function formatRelativeTime(timestamp: number | null): string {
             class="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition"
           >
             保存
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Verify Master Password to reveal or copy plain text -->
+    <div
+      v-if="showAuthModal"
+      class="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-3"
+    >
+      <div class="w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden p-5 space-y-3.5 max-w-[320px]">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center">
+            <Lock class="w-4 h-4" />
+          </div>
+          <div>
+            <h3 class="text-xs font-bold text-slate-900">查看/复制明文密码</h3>
+            <p class="text-[10px] text-slate-400">请输入主密码确认身份</p>
+          </div>
+        </div>
+
+        <div class="space-y-1">
+          <input
+            v-model="authPasswordInput"
+            type="password"
+            placeholder="输入主密码"
+            autofocus
+            @keyup.enter="handleConfirmAuth"
+            class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 text-center"
+          />
+          <p v-if="authError" class="text-[10px] text-rose-600 font-medium text-center">{{ authError }}</p>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button
+            @click="showAuthModal = false"
+            class="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 rounded-lg"
+          >
+            取消
+          </button>
+          <button
+            @click="handleConfirmAuth"
+            :disabled="isAuthorizing"
+            class="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition disabled:opacity-50"
+          >
+            {{ isAuthorizing ? '核验中...' : '确认核验' }}
           </button>
         </div>
       </div>

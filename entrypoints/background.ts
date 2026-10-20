@@ -8,6 +8,7 @@ import {
   unlockVault,
   lockVault,
   setupMasterPassword,
+  verifyMasterPassword,
   loadVaultFromLocalEncrypted,
   saveVaultItem,
   deleteVaultItem,
@@ -96,6 +97,12 @@ export default defineBackground(() => {
         case 'UNLOCK_VAULT': {
           const res = await unlockVault(request.password);
           sendResponse(res);
+          break;
+        }
+
+        case 'VERIFY_MASTER_PASSWORD': {
+          const valid = await verifyMasterPassword(request.password);
+          sendResponse({ valid });
           break;
         }
 

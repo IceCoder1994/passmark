@@ -7,6 +7,7 @@ export const STORAGE_KEYS = {
   ENCRYPTED_VAULT: 'passmark_encrypted_vault',
   LAST_SYNC: 'passmark_last_sync',
   SYNC_OPTIONS: 'passmark_sync_options',
+  DEVICE_WORK_KEY: 'passmark_device_work_key',
 } as const;
 
 export interface SyncOptions {
@@ -98,4 +99,17 @@ export async function updateSyncState(patch: Partial<SyncState>): Promise<SyncSt
   const next = { ...current, ...patch };
   await chrome.storage.local.set({ [STORAGE_KEYS.LAST_SYNC]: next });
   return next;
+}
+
+export async function getDeviceWorkKey(): Promise<string | null> {
+  const res = await chrome.storage.local.get(STORAGE_KEYS.DEVICE_WORK_KEY);
+  return res[STORAGE_KEYS.DEVICE_WORK_KEY] || null;
+}
+
+export async function setDeviceWorkKey(keyBase64: string | null): Promise<void> {
+  if (keyBase64 === null) {
+    await chrome.storage.local.remove(STORAGE_KEYS.DEVICE_WORK_KEY);
+  } else {
+    await chrome.storage.local.set({ [STORAGE_KEYS.DEVICE_WORK_KEY]: keyBase64 });
+  }
 }

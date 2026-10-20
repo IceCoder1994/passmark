@@ -17,9 +17,11 @@ import {
   setAuthVerifier,
   getEncryptedVault,
   setEncryptedVault,
+  getDeviceWorkKey,
+  setDeviceWorkKey,
 } from './storage';
 
-// In-memory runtime state & chrome.storage.session persistence
+// In-memory runtime state & chrome.storage persistence
 const SESSION_STORAGE_KEY = 'passmark_session_vault_key';
 let activeCryptoKey: CryptoKey | null = null;
 let lastUnlockedTimestamp: number = 0;
@@ -27,9 +29,10 @@ let cachedVaultItems: VaultItem[] | null = null;
 
 async function persistKeyToSession(key: CryptoKey) {
   try {
+    const raw = await crypto.subtle.exportKey('raw', key);
+    const b64 = uint8ArrayToBase64(new Uint8Array(raw));
+
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.session) {
-      const raw = await crypto.subtle.exportKey('raw', key);
-      const b64 = uint8ArrayToBase64(new Uint8Array(raw));
       await chrome.storage.session.set({
         [SESSION_STORAGE_KEY]: {
           key: b64,
@@ -37,8 +40,11 @@ async function persistKeyToSession(key: CryptoKey) {
         },
       });
     }
+
+    // Persist to local device storage for Mode A seamless autofill & sync
+    await setDeviceWorkKey(b64);
   } catch (e) {
-    console.warn('[PassMark] Failed to persist key to session:', e);
+    console.warn('[PassMark] Failed to persist key:', e);
   }
 }
 
@@ -46,17 +52,11 @@ export async function ensureActiveCryptoKey(): Promise<CryptoKey | null> {
   if (activeCryptoKey) return activeCryptoKey;
 
   try {
+    // 1. Check session storage
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.session) {
       const sessionData = await chrome.storage.session.get(SESSION_STORAGE_KEY);
       const session = sessionData[SESSION_STORAGE_KEY];
       if (session && session.key) {
-        const security = await getSecurityConfig();
-        const timeout = (security.lockTimeoutMinutes || 15) * 60 * 1000;
-        if (timeout > 0 && Date.now() - session.unlockedAt > timeout) {
-          await lockVault();
-          return null;
-        }
-
         const keyBytes = base64ToUint8Array(session.key);
         activeCryptoKey = await crypto.subtle.importKey(
           'raw',
@@ -69,23 +69,30 @@ export async function ensureActiveCryptoKey(): Promise<CryptoKey | null> {
         return activeCryptoKey;
       }
     }
+
+    // 2. Check trusted local storage for Mode A (Chrome native style)
+    const deviceKeyB64 = await getDeviceWorkKey();
+    if (deviceKeyB64) {
+      const keyBytes = base64ToUint8Array(deviceKeyB64);
+      activeCryptoKey = await crypto.subtle.importKey(
+        'raw',
+        keyBytes as BufferSource,
+        'AES-GCM',
+        true,
+        ['encrypt', 'decrypt']
+      );
+      lastUnlockedTimestamp = Date.now();
+      return activeCryptoKey;
+    }
   } catch (e) {
-    console.warn('[PassMark] Error reading session key:', e);
+    console.warn('[PassMark] Error reading working key:', e);
   }
   return null;
 }
 
-export async function isVaultUnlocked(timeoutMinutes = 15): Promise<boolean> {
+export async function isVaultUnlocked(): Promise<boolean> {
   const key = await ensureActiveCryptoKey();
-  if (!key) return false;
-  if (timeoutMinutes <= 0) return true;
-
-  const elapsed = (Date.now() - lastUnlockedTimestamp) / 1000 / 60;
-  if (elapsed > timeoutMinutes) {
-    await lockVault();
-    return false;
-  }
-  return true;
+  return !!key;
 }
 
 export async function lockVault(): Promise<void> {
@@ -96,7 +103,30 @@ export async function lockVault(): Promise<void> {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.session) {
       await chrome.storage.session.remove(SESSION_STORAGE_KEY);
     }
+    // Also remove local device key on explicit manual lock
+    await setDeviceWorkKey(null);
   } catch {}
+}
+
+/**
+ * Verify master password (used for viewing/copying sensitive plain text)
+ */
+export async function verifyMasterPassword(password: string): Promise<boolean> {
+  const security = await getSecurityConfig();
+  if (!security.isConfigured || !security.salt) {
+    return false;
+  }
+  const verifier = await getAuthVerifier();
+  if (!verifier) {
+    return false;
+  }
+  try {
+    const key = await deriveKey(password, security.salt);
+    const decryptedVerifier = await decryptText(verifier, key);
+    return decryptedVerifier === AUTH_CHECK_PAYLOAD;
+  } catch {
+    return false;
+  }
 }
 
 export function getActiveCryptoKey(): CryptoKey | null {
