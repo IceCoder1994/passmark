@@ -34,7 +34,7 @@ export default defineBackground(() => {
   chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name === 'PASSMARK_PERIODIC_SYNC') {
       const options = await getSyncOptions();
-      if (options.autoSync && isVaultUnlocked()) {
+      if (options.autoSync && (await isVaultUnlocked())) {
         console.log('[PassMark] Executing periodic background sync...');
         await performSync();
       }
@@ -53,7 +53,7 @@ export default defineBackground(() => {
 
     bookmarkDebounceTimer = setTimeout(async () => {
       const options = await getSyncOptions();
-      if (options.autoSync && options.syncBookmarks && isVaultUnlocked()) {
+      if (options.autoSync && options.syncBookmarks && (await isVaultUnlocked())) {
         console.log('[PassMark] Bookmarks changed, triggering debounced sync...');
         await performSync();
       }
@@ -82,7 +82,7 @@ export default defineBackground(() => {
     (async () => {
       switch (request.type) {
         case 'CHECK_UNLOCKED': {
-          const unlocked = isVaultUnlocked();
+          const unlocked = await isVaultUnlocked();
           sendResponse({ unlocked });
           break;
         }
@@ -100,7 +100,7 @@ export default defineBackground(() => {
         }
 
         case 'LOCK_VAULT': {
-          lockVault();
+          await lockVault();
           sendResponse({ success: true });
           break;
         }
@@ -112,18 +112,21 @@ export default defineBackground(() => {
         }
 
         case 'GET_MATCHING_CREDENTIALS': {
-          if (!isVaultUnlocked()) {
+          const unlocked = await isVaultUnlocked();
+          if (!unlocked) {
+            console.log('[PassMark BG] Vault locked, returning empty for:', request.url);
             sendResponse({ items: [] });
             return;
           }
           const items = await loadVaultFromLocalEncrypted();
           const matched = matchVaultItemsForUrl(items, request.url || '');
+          console.log('[PassMark BG] URL:', request.url, 'Total items:', items.length, 'Matched:', matched.length);
           sendResponse({ items: matched });
           break;
         }
 
         case 'SAVE_NEW_CREDENTIAL': {
-          if (!isVaultUnlocked()) {
+          if (!(await isVaultUnlocked())) {
             sendResponse({ success: false, message: '请先在插件中解锁保险箱' });
             return;
           }
@@ -148,7 +151,7 @@ export default defineBackground(() => {
         }
 
         case 'IMPORT_CSV_CREDENTIALS': {
-          if (!isVaultUnlocked()) {
+          if (!(await isVaultUnlocked())) {
             sendResponse({ success: false, message: '保险箱已锁定，请先输入主密码解锁' });
             return;
           }
@@ -166,7 +169,8 @@ export default defineBackground(() => {
         }
 
         case 'GET_VAULT_ITEMS': {
-          if (!isVaultUnlocked()) {
+          const unlocked = await isVaultUnlocked();
+          if (!unlocked) {
             sendResponse({ items: [], unlocked: false });
             return;
           }
@@ -176,7 +180,7 @@ export default defineBackground(() => {
         }
 
         case 'SAVE_VAULT_ITEM': {
-          if (!isVaultUnlocked()) {
+          if (!(await isVaultUnlocked())) {
             sendResponse({ success: false, message: '请先在插件中解锁保险箱' });
             return;
           }
@@ -194,7 +198,7 @@ export default defineBackground(() => {
         }
 
         case 'DELETE_VAULT_ITEM': {
-          if (!isVaultUnlocked()) {
+          if (!(await isVaultUnlocked())) {
             sendResponse({ success: false, message: '请先在插件中解锁保险箱' });
             return;
           }

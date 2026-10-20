@@ -1,5 +1,6 @@
 export default defineContentScript({
   matches: ['<all_urls>'],
+  allFrames: true,
   runAt: 'document_idle',
   main() {
     initAutofillEngine();
@@ -17,10 +18,17 @@ function initAutofillEngine() {
   chrome.runtime.sendMessage(
     { type: 'GET_MATCHING_CREDENTIALS', url: currentUrl },
     (response) => {
-      if (chrome.runtime.lastError || !response || !response.items || response.items.length === 0) {
+      if (chrome.runtime.lastError) {
+        console.warn('[PassMark] Runtime error:', chrome.runtime.lastError.message);
         return;
       }
+      if (!response || !response.items || response.items.length === 0) {
+        console.log('[PassMark] 0 matched credentials for:', currentUrl);
+        return;
+      }
+
       matchedItems = response.items;
+      console.log(`[PassMark] Found ${matchedItems.length} matched credentials for:`, currentUrl);
 
       // Scan existing inputs
       scanAndAttachInputs();
@@ -61,6 +69,7 @@ function scanAndAttachInputs() {
     if (isPassword || isUsername) {
       input.dataset.passmarkAttached = 'true';
       attachInputEvents(input);
+      attachInFieldBadge(input);
     }
   }
 }
@@ -97,6 +106,81 @@ function attachInputEvents(input: HTMLInputElement) {
 }
 
 /**
+ * Attach a subtle PassMark icon inside/next to the input field
+ */
+function attachInFieldBadge(input: HTMLInputElement) {
+  const rect = input.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'passmark-input-badge';
+  badge.title = 'PassMark: 点击查看已保存账号';
+  badge.style.cssText = `
+    position: fixed;
+    top: ${rect.top + (rect.height - 20) / 2}px;
+    left: ${rect.right - 26}px;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    background: #4f46e5;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    cursor: pointer;
+    z-index: 2147483646;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    opacity: 0.85;
+    transition: opacity 0.15s, transform 0.15s;
+    user-select: none;
+  `;
+  badge.innerHTML = '🔑';
+
+  badge.addEventListener('mouseenter', () => {
+    badge.style.opacity = '1';
+    badge.style.transform = 'scale(1.1)';
+  });
+  badge.addEventListener('mouseleave', () => {
+    badge.style.opacity = '0.85';
+    badge.style.transform = 'scale(1)';
+  });
+
+  badge.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (activeDropdown) {
+      removeDropdown();
+    } else {
+      input.focus();
+      showDropdown(input);
+    }
+  });
+
+  // Reposition badge when page scrolls or resizes
+  const updateBadgePos = () => {
+    if (!input.isConnected) {
+      badge.remove();
+      window.removeEventListener('scroll', updateBadgePos);
+      window.removeEventListener('resize', updateBadgePos);
+      return;
+    }
+    const r = input.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0 || r.top < 0 || r.bottom > window.innerHeight) {
+      badge.style.display = 'none';
+    } else {
+      badge.style.display = 'flex';
+      badge.style.top = `${r.top + (r.height - 20) / 2}px`;
+      badge.style.left = `${r.right - 26}px`;
+    }
+  };
+
+  window.addEventListener('scroll', updateBadgePos, { passive: true });
+  window.addEventListener('resize', updateBadgePos, { passive: true });
+  document.body.appendChild(badge);
+}
+
+/**
  * Setup MutationObserver with debouncing for dynamic content
  */
 function setupDynamicObserver() {
@@ -124,8 +208,7 @@ function showDropdown(input: HTMLInputElement) {
   currentActiveInput = input;
   const rect = input.getBoundingClientRect();
 
-  // If input is not visible or offscreen, skip
-  if (rect.width === 0 || rect.height === 0 || rect.top < 0) return;
+  if (rect.width === 0 || rect.height === 0) return;
 
   const menu = document.createElement('div');
   menu.id = 'passmark-autofill-menu';
@@ -136,11 +219,11 @@ function showDropdown(input: HTMLInputElement) {
     z-index: 2147483647;
     background: #ffffff;
     border: 1px solid #e2e8f0;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
-    border-radius: 10px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    border-radius: 12px;
     padding: 6px;
-    min-width: 220px;
-    max-width: 320px;
+    min-width: 230px;
+    max-width: 340px;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 13px;
     animation: passmarkFadeIn 0.15s ease-out;
@@ -149,7 +232,7 @@ function showDropdown(input: HTMLInputElement) {
   // Header
   const header = document.createElement('div');
   header.style.cssText = `
-    padding: 4px 8px;
+    padding: 6px 8px;
     font-size: 11px;
     font-weight: 600;
     color: #4f46e5;
@@ -163,7 +246,7 @@ function showDropdown(input: HTMLInputElement) {
     <span style="display: flex; align-items: center; gap: 4px;">
       <span>🔑</span> PassMark 账号填充
     </span>
-    <span style="font-size: 10px; color: #94a3b8; font-weight: normal;">${matchedItems.length} 个账号</span>
+    <span style="font-size: 10px; color: #94a3b8; font-weight: normal;">${matchedItems.length} 个可用账号</span>
   `;
   menu.appendChild(header);
 
@@ -171,8 +254,8 @@ function showDropdown(input: HTMLInputElement) {
   for (const item of matchedItems) {
     const itemEl = document.createElement('div');
     itemEl.style.cssText = `
-      padding: 6px 8px;
-      border-radius: 6px;
+      padding: 7px 8px;
+      border-radius: 8px;
       cursor: pointer;
       display: flex;
       flex-direction: column;
@@ -206,7 +289,6 @@ function showDropdown(input: HTMLInputElement) {
   document.body.appendChild(menu);
   activeDropdown = menu;
 
-  // Reposition on scroll/resize or dismiss on outside click
   const closeHandler = (e: MouseEvent) => {
     if (activeDropdown && !activeDropdown.contains(e.target as Node) && e.target !== input) {
       removeDropdown();
@@ -242,9 +324,9 @@ function fillPageWithCredential(item: any, triggerInput?: HTMLInputElement): boo
     (triggerInput && isLikelyUsernameField(triggerInput) ? triggerInput : null) ||
     null;
 
-  if (!usernameInput && pwdInput) {
+  if (!usernameInput) {
     const inputs = Array.from(
-      (pwdInput.form || form).querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
+      (pwdInput?.form || form).querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
     );
     usernameInput = inputs.find(isLikelyUsernameField) || inputs[0] || null;
   }
@@ -262,7 +344,7 @@ function fillPageWithCredential(item: any, triggerInput?: HTMLInputElement): boo
   }
 
   if (filled) {
-    showNotification(`已填充 ${item.username || item.title}`);
+    showNotification(`已填充: ${item.username || item.title}`);
   }
 
   return filled;

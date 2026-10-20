@@ -6,6 +6,8 @@ import {
   encryptText,
   decryptText,
   generateSalt,
+  uint8ArrayToBase64,
+  base64ToUint8Array,
   AUTH_CHECK_PAYLOAD,
 } from './crypto';
 import {
@@ -17,27 +19,84 @@ import {
   setEncryptedVault,
 } from './storage';
 
-// In-memory runtime state (never written to disk in plain text)
+// In-memory runtime state & chrome.storage.session persistence
+const SESSION_STORAGE_KEY = 'passmark_session_vault_key';
 let activeCryptoKey: CryptoKey | null = null;
 let lastUnlockedTimestamp: number = 0;
 let cachedVaultItems: VaultItem[] | null = null;
 
-export function isVaultUnlocked(timeoutMinutes = 15): boolean {
-  if (!activeCryptoKey) return false;
+async function persistKeyToSession(key: CryptoKey) {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.session) {
+      const raw = await crypto.subtle.exportKey('raw', key);
+      const b64 = uint8ArrayToBase64(new Uint8Array(raw));
+      await chrome.storage.session.set({
+        [SESSION_STORAGE_KEY]: {
+          key: b64,
+          unlockedAt: Date.now(),
+        },
+      });
+    }
+  } catch (e) {
+    console.warn('[PassMark] Failed to persist key to session:', e);
+  }
+}
+
+export async function ensureActiveCryptoKey(): Promise<CryptoKey | null> {
+  if (activeCryptoKey) return activeCryptoKey;
+
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.session) {
+      const sessionData = await chrome.storage.session.get(SESSION_STORAGE_KEY);
+      const session = sessionData[SESSION_STORAGE_KEY];
+      if (session && session.key) {
+        const security = await getSecurityConfig();
+        const timeout = (security.lockTimeoutMinutes || 15) * 60 * 1000;
+        if (timeout > 0 && Date.now() - session.unlockedAt > timeout) {
+          await lockVault();
+          return null;
+        }
+
+        const keyBytes = base64ToUint8Array(session.key);
+        activeCryptoKey = await crypto.subtle.importKey(
+          'raw',
+          keyBytes as BufferSource,
+          'AES-GCM',
+          true,
+          ['encrypt', 'decrypt']
+        );
+        lastUnlockedTimestamp = session.unlockedAt;
+        return activeCryptoKey;
+      }
+    }
+  } catch (e) {
+    console.warn('[PassMark] Error reading session key:', e);
+  }
+  return null;
+}
+
+export async function isVaultUnlocked(timeoutMinutes = 15): Promise<boolean> {
+  const key = await ensureActiveCryptoKey();
+  if (!key) return false;
   if (timeoutMinutes <= 0) return true;
 
   const elapsed = (Date.now() - lastUnlockedTimestamp) / 1000 / 60;
   if (elapsed > timeoutMinutes) {
-    lockVault();
+    await lockVault();
     return false;
   }
   return true;
 }
 
-export function lockVault(): void {
+export async function lockVault(): Promise<void> {
   activeCryptoKey = null;
   lastUnlockedTimestamp = 0;
   cachedVaultItems = null;
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.session) {
+      await chrome.storage.session.remove(SESSION_STORAGE_KEY);
+    }
+  } catch {}
 }
 
 export function getActiveCryptoKey(): CryptoKey | null {
@@ -47,6 +106,7 @@ export function getActiveCryptoKey(): CryptoKey | null {
 export function setActiveCryptoKey(key: CryptoKey): void {
   activeCryptoKey = key;
   lastUnlockedTimestamp = Date.now();
+  persistKeyToSession(key).catch(console.error);
 }
 
 /**
@@ -73,6 +133,7 @@ export async function setupMasterPassword(password: string): Promise<boolean> {
   activeCryptoKey = key;
   lastUnlockedTimestamp = Date.now();
   cachedVaultItems = [];
+  await persistKeyToSession(key);
 
   return true;
 }
@@ -101,6 +162,7 @@ export async function unlockVault(password: string): Promise<{ success: boolean;
 
     activeCryptoKey = key;
     lastUnlockedTimestamp = Date.now();
+    await persistKeyToSession(key);
 
     // Load and cache vault items
     await loadVaultFromLocalEncrypted();
@@ -115,7 +177,8 @@ export async function unlockVault(password: string): Promise<{ success: boolean;
  * Read and decrypt local vault items
  */
 export async function loadVaultFromLocalEncrypted(): Promise<VaultItem[]> {
-  if (!activeCryptoKey) return [];
+  const key = await ensureActiveCryptoKey();
+  if (!key) return [];
 
   const encrypted = await getEncryptedVault();
   if (!encrypted) {
@@ -124,7 +187,7 @@ export async function loadVaultFromLocalEncrypted(): Promise<VaultItem[]> {
   }
 
   try {
-    const items = await decryptObject<VaultItem[]>(encrypted, activeCryptoKey);
+    const items = await decryptObject<VaultItem[]>(encrypted, key);
     cachedVaultItems = items;
     return items;
   } catch (e) {
@@ -138,12 +201,13 @@ export async function loadVaultFromLocalEncrypted(): Promise<VaultItem[]> {
  * Save items into local encrypted storage
  */
 export async function saveVaultItemsLocal(items: VaultItem[]): Promise<void> {
-  if (!activeCryptoKey) {
+  const key = await ensureActiveCryptoKey();
+  if (!key) {
     throw new Error('保险箱已锁定，无法保存数据');
   }
 
   cachedVaultItems = items;
-  const encrypted = await encryptObject(items, activeCryptoKey);
+  const encrypted = await encryptObject(items, key);
   await setEncryptedVault(encrypted);
 }
 
