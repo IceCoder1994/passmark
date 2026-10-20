@@ -9,34 +9,13 @@ export default defineContentScript({
 
 let matchedItems: any[] = [];
 let activeDropdown: HTMLElement | null = null;
-let currentActiveInput: HTMLInputElement | null = null;
+let currentUrl = window.location.href;
 
 function initAutofillEngine() {
-  const currentUrl = window.location.href;
+  currentUrl = window.location.href;
 
   // 1. Fetch matching credentials from background for this URL
-  chrome.runtime.sendMessage(
-    { type: 'GET_MATCHING_CREDENTIALS', url: currentUrl },
-    (response) => {
-      if (chrome.runtime.lastError) {
-        console.warn('[PassMark] Runtime error:', chrome.runtime.lastError.message);
-        return;
-      }
-      if (!response || !response.items || response.items.length === 0) {
-        console.log('[PassMark] 0 matched credentials for:', currentUrl);
-        return;
-      }
-
-      matchedItems = response.items;
-      console.log(`[PassMark] Found ${matchedItems.length} matched credentials for:`, currentUrl);
-
-      // Scan existing inputs
-      scanAndAttachInputs();
-
-      // Setup MutationObserver to scan dynamically injected forms (modals, SPAs)
-      setupDynamicObserver();
-    }
-  );
+  fetchAndAttachCredentials();
 
   // 2. Setup direct fill listener from Popup
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -46,8 +25,26 @@ function initAutofillEngine() {
     }
   });
 
-  // 3. Setup form submission observer to prompt saving new passwords
+  // 3. Setup form submission observer
   setupCredentialCapture();
+
+  // 4. Setup cleanup and SPA navigation handlers
+  setupNavigationAndCleanup();
+}
+
+function fetchAndAttachCredentials() {
+  chrome.runtime.sendMessage(
+    { type: 'GET_MATCHING_CREDENTIALS', url: window.location.href },
+    (response) => {
+      if (chrome.runtime.lastError || !response || !response.items || response.items.length === 0) {
+        return;
+      }
+
+      matchedItems = response.items;
+      scanAndAttachInputs();
+      setupDynamicObserver();
+    }
+  );
 }
 
 /**
@@ -56,31 +53,62 @@ function initAutofillEngine() {
 function scanAndAttachInputs() {
   if (matchedItems.length === 0) return;
 
+  // Cleanup any old orphaned badges first
+  cleanupStaleBadges();
+
   const inputs = Array.from(
-    document.querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"]):not([type="button"])')
+    document.querySelectorAll<HTMLInputElement>(
+      'input:not([type="hidden"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="search"])'
+    )
   );
 
   for (const input of inputs) {
-    if (input.dataset.passmarkAttached) continue;
+    if (!isElementVisible(input)) continue;
 
     const isPassword = input.type === 'password';
     const isUsername = isLikelyUsernameField(input);
 
     if (isPassword || isUsername) {
-      input.dataset.passmarkAttached = 'true';
-      attachInputEvents(input);
-      attachInFieldBadge(input);
+      if (!input.dataset.passmarkAttached) {
+        input.dataset.passmarkAttached = 'true';
+        attachInputEvents(input);
+      }
+      // Ensure badge exists and is pinned
+      attachOrUpdateBadge(input);
     }
   }
 }
 
 function isLikelyUsernameField(input: HTMLInputElement): boolean {
   const type = (input.type || '').toLowerCase();
-  if (type === 'email') return true;
+  if (type === 'password' || type === 'search' || type === 'button' || type === 'submit') return false;
+
+  const idName = (
+    (input.id || '') + ' ' +
+    (input.name || '') + ' ' +
+    (input.placeholder || '') + ' ' +
+    (input.autocomplete || '') + ' ' +
+    (input.className || '')
+  ).toLowerCase();
+
+  // Disqualify search fields
+  if (
+    idName.includes('search') ||
+    idName.includes('搜索') ||
+    idName.includes('query') ||
+    idName.includes('keyword') ||
+    idName.includes('find')
+  ) {
+    return false;
+  }
+
+  if (type === 'email' || input.autocomplete === 'email' || input.autocomplete === 'username') {
+    return true;
+  }
+
   if (type !== 'text') return false;
 
-  const idName = ((input.id || '') + ' ' + (input.name || '') + ' ' + (input.placeholder || '') + ' ' + (input.autocomplete || '')).toLowerCase();
-  return (
+  const hasUserKeyword = (
     idName.includes('user') ||
     idName.includes('mail') ||
     idName.includes('login') ||
@@ -90,11 +118,19 @@ function isLikelyUsernameField(input: HTMLInputElement): boolean {
     idName.includes('用户名') ||
     idName.includes('邮箱')
   );
+
+  if (hasUserKeyword) {
+    // Only treat as username field if there is a password field on the page / in the form
+    const form = input.form || input.closest('form');
+    if (form && form.querySelector('input[type="password"]')) {
+      return true;
+    }
+    return !!document.querySelector('input[type="password"]');
+  }
+
+  return false;
 }
 
-/**
- * Setup input focus and click events to show autofill dropdown
- */
 function attachInputEvents(input: HTMLInputElement) {
   input.addEventListener('focus', () => {
     showDropdown(input);
@@ -106,15 +142,24 @@ function attachInputEvents(input: HTMLInputElement) {
 }
 
 /**
- * Attach a subtle PassMark icon inside/next to the input field
+ * Attach or update badge for an input
  */
-function attachInFieldBadge(input: HTMLInputElement) {
+function attachOrUpdateBadge(input: HTMLInputElement) {
+  // If badge already exists for this input, don't re-create
+  let existingBadge = (input as any)._passmarkBadge as HTMLElement | undefined;
+  if (existingBadge && existingBadge.isConnected) {
+    return;
+  }
+
   const rect = input.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return;
 
   const badge = document.createElement('div');
   badge.className = 'passmark-input-badge';
   badge.title = 'PassMark: 点击查看已保存账号';
+  (badge as any)._targetInput = input;
+  (input as any)._passmarkBadge = badge;
+
   badge.style.cssText = `
     position: fixed;
     top: ${rect.top + (rect.height - 20) / 2}px;
@@ -157,9 +202,8 @@ function attachInFieldBadge(input: HTMLInputElement) {
     }
   });
 
-  // Reposition badge when page scrolls or resizes
   const updateBadgePos = () => {
-    if (!input.isConnected) {
+    if (!input.isConnected || !isElementVisible(input)) {
       badge.remove();
       window.removeEventListener('scroll', updateBadgePos);
       window.removeEventListener('resize', updateBadgePos);
@@ -181,21 +225,99 @@ function attachInFieldBadge(input: HTMLInputElement) {
 }
 
 /**
- * Setup MutationObserver with debouncing for dynamic content
+ * Remove orphaned, hidden, or disconnected badges
+ */
+function cleanupStaleBadges() {
+  const badges = document.querySelectorAll<HTMLElement>('.passmark-input-badge');
+  for (const badge of Array.from(badges)) {
+    const target = (badge as any)._targetInput as HTMLInputElement | undefined;
+    if (!target || !target.isConnected || !isElementVisible(target)) {
+      badge.remove();
+    }
+  }
+}
+
+function removeAllBadgesAndMenus() {
+  removeDropdown();
+  const badges = document.querySelectorAll('.passmark-input-badge');
+  for (const b of Array.from(badges)) {
+    b.remove();
+  }
+}
+
+function isElementVisible(el: HTMLElement): boolean {
+  if (!el.isConnected) return false;
+  if (el.offsetParent === null && el.style.position !== 'fixed') return false;
+
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    return false;
+  }
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
+/**
+ * Setup MutationObserver and periodic heartbeat
  */
 function setupDynamicObserver() {
   let debounceTimer: any = null;
   const observer = new MutationObserver(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
+      cleanupStaleBadges();
       scanAndAttachInputs();
-    }, 200);
+    }, 250);
   });
 
   observer.observe(document.body || document.documentElement, {
     childList: true,
     subtree: true,
   });
+
+  // Heartbeat cleanup every 1 second
+  setInterval(() => {
+    cleanupStaleBadges();
+  }, 1000);
+}
+
+/**
+ * Handle SPA route changes, page unloads, and form submissions
+ */
+function setupNavigationAndCleanup() {
+  // Purge all badges on form submit or Enter key
+  document.addEventListener('submit', () => {
+    removeAllBadgesAndMenus();
+  }, true);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const target = e.target as HTMLElement;
+      if (target && target.tagName === 'INPUT') {
+        setTimeout(cleanupStaleBadges, 300);
+      }
+    }
+  }, true);
+
+  // SPA navigation events
+  window.addEventListener('popstate', () => {
+    removeAllBadgesAndMenus();
+    setTimeout(fetchAndAttachCredentials, 500);
+  });
+  window.addEventListener('hashchange', () => {
+    removeAllBadgesAndMenus();
+    setTimeout(fetchAndAttachCredentials, 500);
+  });
+
+  // Observe URL changes in modern SPAs
+  let lastHref = window.location.href;
+  setInterval(() => {
+    if (window.location.href !== lastHref) {
+      lastHref = window.location.href;
+      removeAllBadgesAndMenus();
+      fetchAndAttachCredentials();
+    }
+  }, 800);
 }
 
 /**
@@ -205,9 +327,7 @@ function showDropdown(input: HTMLInputElement) {
   if (matchedItems.length === 0) return;
   removeDropdown();
 
-  currentActiveInput = input;
   const rect = input.getBoundingClientRect();
-
   if (rect.width === 0 || rect.height === 0) return;
 
   const menu = document.createElement('div');
@@ -326,7 +446,9 @@ function fillPageWithCredential(item: any, triggerInput?: HTMLInputElement): boo
 
   if (!usernameInput) {
     const inputs = Array.from(
-      (pwdInput?.form || form).querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
+      (pwdInput?.form || form).querySelectorAll<HTMLInputElement>(
+        'input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])'
+      )
     );
     usernameInput = inputs.find(isLikelyUsernameField) || inputs[0] || null;
   }
@@ -381,7 +503,9 @@ function setupCredentialCapture() {
     if (!pwdInput || !pwdInput.value) return;
 
     const inputs = Array.from(
-      form.querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
+      form.querySelectorAll<HTMLInputElement>(
+        'input:not([type="hidden"]):not([type="password"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])'
+      )
     );
     const usernameInput = inputs.find(isLikelyUsernameField) || inputs[0] || null;
 
