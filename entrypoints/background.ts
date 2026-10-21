@@ -3,6 +3,9 @@ import {
   countBookmarks,
   getLocalBookmarkTree,
 } from '../utils/bookmarks';
+import { WebDavClient } from '../utils/webdav';
+import { encryptObject } from '../utils/crypto';
+import type { RemoteMeta } from '../types';
 import {
   isVaultUnlocked,
   unlockVault,
@@ -22,8 +25,8 @@ import {
   getSyncOptions,
   getWebDavConfig,
   getSecurityConfig,
+  getAuthVerifier,
   updateSyncState,
-  getSyncState,
 } from '../utils/storage';
 
 export default defineBackground(() => {

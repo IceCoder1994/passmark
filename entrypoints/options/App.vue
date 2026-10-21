@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import {
   Cloud,
@@ -24,14 +24,17 @@ import {
   getWebDavConfig,
   setWebDavConfig,
   getSecurityConfig,
+  setSecurityConfig,
   getSyncOptions,
   setSyncOptions,
   getSyncState,
+  setDeviceWorkKey,
 } from '../../utils/storage';
 import { WebDavClient } from '../../utils/webdav';
 import { setupMasterPassword, unlockVault, isVaultUnlocked } from '../../utils/vault';
 import { performSync } from '../../utils/sync';
 import { parseChromePasswordsCSV, type ParsedCredential } from '../../utils/csv';
+import { getPasswordsUrl, getBrowserName } from '../../utils/browser';
 import type { WebDavConfig, SecurityConfig, RemoteMeta } from '../../types';
 import type { SyncOptions } from '../../utils/storage';
 
@@ -48,6 +51,7 @@ const security = ref<SecurityConfig>({
   salt: '',
   lockTimeoutMinutes: 15,
   isConfigured: false,
+  rememberDevice: false,
 });
 
 const syncOptions = ref<SyncOptions>({
@@ -83,6 +87,9 @@ const isImporting = ref(false);
 const importResult = ref<{ success: boolean; message: string; added?: number; updated?: number } | null>(null);
 const isDragging = ref(false);
 
+// 当前浏览器名称，用于界面文案
+const browserName = getBrowserName();
+
 // Cloud Vault Recovery States
 const cloudVaultDetected = ref(false);
 const cloudMeta = ref<RemoteMeta | null>(null);
@@ -111,7 +118,8 @@ function checkUnlockState() {
 }
 
 function openChromePasswordSettings() {
-  chrome.tabs.create({ url: 'chrome://password-manager/settings' });
+  // 按当前浏览器跳转到对应的密码管理页
+  chrome.tabs.create({ url: getPasswordsUrl() });
 }
 
 function handleFileDrop(e: DragEvent) {
@@ -335,11 +343,19 @@ async function handleSaveSettings() {
       isUnlocked.value = true;
     }
 
-    // 2. Save WebDAV and sync preferences
+    // 2. 保存安全配置中的“记住本设备”开关
+    await setSecurityConfig(security.value);
+
+    // 3. Save WebDAV and sync preferences
     await setWebDavConfig(webdav.value);
     await setSyncOptions(syncOptions.value);
 
-    // 3. Notify background to update alarms
+    // 4. 若关闭了“记住本设备”，立即清除本地持久密钥
+    if (!security.value.rememberDevice) {
+      await setDeviceWorkKey(null);
+    }
+
+    // 5. Notify background to update alarms
     chrome.runtime.sendMessage({ type: 'REFRESH_ALARM' });
 
     saveMessage.value = {
@@ -391,7 +407,7 @@ async function handleTriggerSync() {
             <h1 class="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
               PassMark <span class="text-sm font-normal text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">秘签</span>
             </h1>
-            <p class="text-xs text-slate-500 mt-0.5">安全去中心化 · WebDAV 端到端加密书签与密码同步</p>
+            <p class="text-xs text-slate-500 mt-0.5">安全去中心化 · WebDAV 端到端加密收藏夹与密码同步</p>
           </div>
         </div>
         <div class="flex items-center gap-3">
@@ -569,7 +585,7 @@ async function handleTriggerSync() {
         <div class="p-6 space-y-4">
           <p class="text-xs text-slate-500 leading-relaxed">
             PassMark 采用 <b>PBKDF2 (100,000次计算) + AES-256-GCM</b> 端到端加密。
-            所有书签和密码均在本地用主密码生成的加密密钥完成加密，密文才会被上传至 WebDAV，即使云盘提供商或黑客也绝对无法读取明文。
+            所有收藏夹和密码均在本地用主密码生成的加密密钥完成加密，密文才会被上传至 WebDAV，即使云盘提供商或黑客也绝对无法读取明文。
           </p>
 
           <!-- Case A: Cloud Vault Detected on WebDAV -->
@@ -579,10 +595,10 @@ async function handleTriggerSync() {
                 <Cloud class="w-4 h-4 text-indigo-600" />
                 <span>检测到 WebDAV 已存在云端保险箱备份！</span>
               </div>
-              <span class="text-[10px] text-indigo-500">发现云端加密凭据与书签</span>
+              <span class="text-[10px] text-indigo-500">发现云端加密凭据与收藏夹</span>
             </div>
             <p class="text-[11px] text-indigo-700 leading-relaxed">
-              远端网盘已发现历史同步数据（含加密数据）。请输入原保险箱的主密码，一键恢复并还原所有密码和书签到当前浏览器。
+              远端网盘已发现历史同步数据（含加密数据）。请输入原保险箱的主密码，一键恢复并还原所有密码和收藏夹到当前浏览器。
             </p>
             <div class="flex items-center gap-2 pt-1">
               <input
@@ -645,11 +661,29 @@ async function handleTriggerSync() {
                   <CheckCircle2 class="w-5 h-5" />
                 </div>
                 <div>
-                  <p class="text-xs font-semibold text-slate-800">主密码与设备工作密钥处于激活状态</p>
-                  <p class="text-[11px] text-slate-400">已启用无感填充与后台全天候 WebDAV 静默加密同步。</p>
+                  <p class="text-xs font-semibold text-slate-800">主密码已启用，加密保险箱处于激活状态</p>
+                  <p class="text-[11px] text-slate-400">
+                    {{ security.rememberDevice ? '已开启本设备记忆：重启浏览器后仍可自动填充与后台同步。' : '未开启本设备记忆：重启浏览器后需重新输入主密码解锁。' }}
+                  </p>
                 </div>
               </div>
             </div>
+
+            <!-- 记住本设备：默认关闭，避免密钥长期驻留本地 -->
+            <label class="flex items-start gap-2.5 p-4 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
+              <input
+                type="checkbox"
+                v-model="security.rememberDevice"
+                class="mt-0.5 w-3.5 h-3.5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+              />
+              <span class="space-y-0.5">
+                <span class="block text-xs font-medium text-slate-800">在本设备记住解锁状态</span>
+                <span class="block text-[11px] text-slate-500 leading-relaxed">
+                  默认关闭：密钥仅保存在浏览器会话中，关闭浏览器后自动失效，重启后需重新输入主密码。<br />
+                  开启后密钥会持久保存在本机扩展存储中，重启浏览器仍可自动填充与后台同步。若他人也能使用本设备，建议保持关闭。
+                </span>
+              </span>
+            </label>
 
             <div class="flex items-center justify-end gap-2">
               <button
@@ -685,8 +719,8 @@ async function handleTriggerSync() {
         <div class="p-6 divide-y divide-slate-100">
           <div class="py-3 flex items-center justify-between">
             <div>
-              <p class="text-xs font-medium text-slate-900">Chrome 原生书签同步</p>
-              <p class="text-[11px] text-slate-400">读取与监听书签变动，与 WebDAV 进行安全双向合并。</p>
+              <p class="text-xs font-medium text-slate-900">{{ browserName }} 原生收藏夹同步</p>
+              <p class="text-[11px] text-slate-400">读取与监听收藏夹变动，与 WebDAV 进行安全双向合并。</p>
             </div>
             <label class="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" v-model="syncOptions.syncBookmarks" class="sr-only peer" />
@@ -708,7 +742,7 @@ async function handleTriggerSync() {
           <div class="py-3 flex items-center justify-between">
             <div>
               <p class="text-xs font-medium text-slate-900">自动同步 (变动防抖 & 定时)</p>
-              <p class="text-[11px] text-slate-400">书签修改时延迟 5 秒自动推送到云端，并在后台定期检查。</p>
+              <p class="text-[11px] text-slate-400">收藏夹修改时延迟 5 秒自动推送到云端，并在后台定期检查。</p>
             </div>
             <label class="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" v-model="syncOptions.autoSync" class="sr-only peer" />
@@ -732,12 +766,12 @@ async function handleTriggerSync() {
           <!-- Step by Step instructions -->
           <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
             <h3 class="text-xs font-semibold text-slate-900 flex items-center gap-1.5">
-              <span>💡</span> 如何从 Chrome 导出已有密码？
+              <span>💡</span> 如何从 {{ browserName }} 导出已有密码？
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-600">
               <div class="p-2.5 bg-white rounded-lg border border-slate-100 space-y-1">
                 <span class="font-bold text-indigo-600 text-[11px]">步骤 1</span>
-                <p>打开 Chrome 密码管理设置：</p>
+                <p>打开 {{ browserName }} 密码管理设置：</p>
                 <button
                   type="button"
                   @click="openChromePasswordSettings"

@@ -1,6 +1,8 @@
 {
   "extends": "./.wxt/tsconfig.json",
   "compilerOptions": {
+    "types": ["chrome"],
+    "noUncheckedIndexedAccess": false,
     "target": "ESNext",
     "useDefineForClassFields": true,
     "module": "ESNext",

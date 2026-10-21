@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import {
   ShieldCheck,
@@ -31,10 +31,14 @@ import {
   matchVaultItemsForUrl,
 } from '../../utils/vault';
 import { getLocalBookmarkTree, countBookmarks } from '../../utils/bookmarks';
+import { getBookmarksUrl, getBrowserName } from '../../utils/browser';
 import type { VaultItem, SyncState } from '../../types';
 
 // Tab selection: 'sync' | 'vault'
 const activeTab = ref<'sync' | 'vault'>('sync');
+
+// 当前浏览器名称，用于界面文案
+const browserName = getBrowserName();
 
 // Auth & Setup states
 const isConfigured = ref(false);
@@ -192,7 +196,8 @@ function openOptionsPage() {
 }
 
 function openBookmarksManager() {
-  chrome.tabs.create({ url: 'chrome://bookmarks/' });
+  // 按当前浏览器跳转到对应的收藏夹管理页
+  chrome.tabs.create({ url: getBookmarksUrl() });
 }
 
 // Filtered vault items
@@ -505,7 +510,7 @@ function formatRelativeTime(timestamp: number | null): string {
           ]"
         >
           <FolderSync class="w-3.5 h-3.5" />
-          <span>书签与同步</span>
+          <span>收藏夹与同步</span>
         </button>
 
         <button
@@ -543,7 +548,7 @@ function formatRelativeTime(timestamp: number | null): string {
             <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
               <div class="flex items-center gap-1.5 text-slate-500 mb-1">
                 <Bookmark class="w-3.5 h-3.5 text-indigo-500" />
-                <span class="text-[11px]">本地书签</span>
+                <span class="text-[11px]">本地收藏夹</span>
               </div>
               <p class="text-lg font-bold text-slate-900">{{ syncState.bookmarkCount }}</p>
             </div>
@@ -590,7 +595,7 @@ function formatRelativeTime(timestamp: number | null): string {
             class="w-full py-2 px-4 text-xs font-medium rounded-xl text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition flex items-center justify-center gap-1.5"
           >
             <ExternalLink class="w-3.5 h-3.5 text-slate-400" />
-            打开 Chrome 书签管理器
+            打开 {{ browserName }} 收藏夹管理器
           </button>
         </div>
       </div>

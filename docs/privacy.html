@@ -1,0 +1,230 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PassMark 隐私政策 · Privacy Policy</title>
+<style>
+  :root {
+    --indigo: #4f46e5;
+    --slate-900: #0f172a;
+    --slate-700: #334155;
+    --slate-600: #475569;
+    --slate-200: #e2e8f0;
+    --slate-50: #f8fafc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--slate-50);
+    color: var(--slate-700);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
+      "PingFang SC", "Hiragino Sans GB", sans-serif;
+    line-height: 1.75;
+    font-size: 16px;
+  }
+  .wrap {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 40px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--slate-200);
+  }
+  header img { width: 48px; height: 48px; border-radius: 12px; }
+  header .name { font-size: 20px; font-weight: 700; color: var(--slate-900); }
+  header .sub { font-size: 13px; color: #94a3b8; }
+  h1 { font-size: 30px; color: var(--slate-900); margin: 0 0 8px; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 21px;
+    color: var(--slate-900);
+    margin: 44px 0 14px;
+    padding-top: 8px;
+    letter-spacing: -0.01em;
+  }
+  h3 { font-size: 17px; color: var(--slate-900); margin: 28px 0 10px; }
+  p { margin: 0 0 14px; }
+  ul { margin: 0 0 16px; padding-left: 22px; }
+  li { margin-bottom: 7px; }
+  a { color: var(--indigo); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    background: #eef2ff;
+    color: #4338ca;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 18px 0 24px;
+    font-size: 14px;
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  th {
+    background: #f1f5f9;
+    text-align: left;
+    padding: 11px 14px;
+    font-weight: 600;
+    color: var(--slate-900);
+    border-bottom: 1px solid var(--slate-200);
+  }
+  td {
+    padding: 11px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  hr {
+    border: none;
+    border-top: 1px solid var(--slate-200);
+    margin: 48px 0;
+  }
+  .lang-switch {
+    display: inline-flex;
+    gap: 8px;
+    margin-bottom: 32px;
+  }
+  .lang-switch a {
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: #eef2ff;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--slate-200);
+    font-size: 13px;
+    color: #94a3b8;
+  }
+  @media (max-width: 640px) {
+    .wrap { padding: 32px 18px 64px; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 19px; }
+    table { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="icon-128.png" alt="PassMark" />
+      <div>
+        <div class="name">PassMark 秘签</div>
+        <div class="sub">WebDAV 端到端加密同步扩展</div>
+      </div>
+    </header>
+<h1>PassMark 隐私政策 / Privacy Policy</h1>
+<p>最后更新：2026-10-21 · Last updated: October 21, 2026</p>
+<hr />
+<h2>中文</h2>
+<h3>一句话总结</h3>
+<p>PassMark 不收集、不上传、不转售任何用户数据。你的收藏夹与密码只在你的浏览器本地完成加密，密文仅上传到<strong>你自己填写的 WebDAV 服务器</strong>，开发者无法访问。</p>
+<h3>1. 我们处理哪些数据</h3>
+<p>PassMark 仅在你的设备本地处理以下数据，用于实现其唯一功能（通过你自己的 WebDAV 服务器在设备间同步个人数据）：</p>
+<table><thead><tr>
+<th>数据类型</th><th>用途</th><th>存储位置</th>
+</tr></thead><tbody>
+<tr><td>浏览器收藏夹（标题、网址、文件夹结构）</td><td>与 WebDAV 双向同步</td><td>本地浏览器 + 你的 WebDAV</td></tr>
+<tr><td>登录凭据（网站、用户名、密码、备注）</td><td>密码保险箱、自动填充</td><td>本地加密存储 + 你的 WebDAV（密文）</td></tr>
+<tr><td>WebDAV 连接配置（地址、账号、授权密码）</td><td>连接你指定的服务器</td><td>仅本地扩展存储</td></tr>
+<tr><td>主密码</td><td>派生加密密钥</td><td><strong>仅内存与会话存储，绝不上传、绝不写入磁盘明文</strong></td></tr>
+</tbody></table>
+<h3>2. 加密方式</h3>
+<ul>
+<li>使用浏览器原生 Web Cryptography API：PBKDF2（100,000 次迭代，SHA-256）派生密钥，AES-256-GCM 认证加密。</li>
+<li>上传到 WebDAV 的文件（<code>bookmarks.enc</code>、<code>vault.enc</code>）<strong>全部为密文</strong>。<code>meta.json</code> 仅包含版本号、时间戳与随机盐值，不含任何明文内容。</li>
+<li>主密码不会离开你的设备。若你遗失主密码，数据无法恢复，开发者也无法协助恢复。</li>
+</ul>
+<h3>3. 网络请求</h3>
+<p>PassMark 只向<strong>你本人在设置页填写的 WebDAV 地址</strong>发起网络请求。扩展不包含任何分析 SDK、遥测、广告或第三方追踪代码，也不会向开发者或任何第三方服务器发送数据。</p>
+<h3>4. 权限说明</h3>
+<table><thead><tr>
+<th>权限</th><th>为什么需要</th>
+</tr></thead><tbody>
+<tr><td><code>bookmarks</code></td><td>读取并双向同步浏览器收藏夹</td></tr>
+<tr><td><code>storage</code> / <code>unlimitedStorage</code></td><td>保存配置、加密后的保险箱密文与同步状态；收藏夹与密码库密文可能超过默认配额</td></tr>
+<tr><td><code>alarms</code></td><td>按你设定的间隔（5–60 分钟）触发后台自动同步</td></tr>
+<tr><td>访问所有网站的权限（<code>&lt;all_urls&gt;</code>）</td><td>① 向你自行填写的任意 WebDAV 地址发起请求；② 在任意网站的登录表单旁注入自动填充图标。扩展不会读取或上传网页内容</td></tr>
+</tbody></table>
+<h3>5. 「记住本设备」选项</h3>
+<p>该选项<strong>默认关闭</strong>。关闭时，用于解密的密钥仅保存在浏览器会话存储中，关闭浏览器即失效。</p>
+<p>若你主动开启，密钥会被保存在本机扩展存储（<code>chrome.storage.local</code>）中，以便浏览器重启后仍能自动填充与后台同步。该密钥始终只存在于本机，不会上传。在共享设备上建议保持关闭。</p>
+<h3>6. 数据删除</h3>
+<ul>
+<li>卸载扩展会清除扩展的全部本地存储。</li>
+<li>云端密文位于你自己的 WebDAV 服务器，请自行删除 <code>/passmark/</code> 目录下的 <code>meta.json</code>、<code>bookmarks.enc</code>、<code>vault.enc</code>。</li>
+<li>开发者不持有任何可删除的用户数据副本。</li>
+</ul>
+<h3>7. 儿童隐私</h3>
+<p>本扩展不面向 13 岁以下儿童，也不会有意收集其任何信息。</p>
+<h3>8. 政策变更</h3>
+<p>若本政策发生实质性变更，将更新本文件顶部的日期，并在扩展的商店页面说明。继续使用即表示接受更新后的政策。</p>
+<h3>9. 联系方式</h3>
+<p>如有疑问，请通过 GitHub Issues 联系：&lt;<a href="https://github.com/IceCoder1994/passmark/issues&gt;">https://github.com/IceCoder1994/passmark/issues&gt;</a></p>
+<hr />
+<h2>English</h2>
+<h3>Summary</h3>
+<p>PassMark does not collect, transmit, or sell any user data. Your bookmarks and passwords are encrypted locally in your browser, and the ciphertext is uploaded only to the <strong>WebDAV server you configure yourself</strong>. The developer has no access to it.</p>
+<h3>1. Data We Process</h3>
+<p>PassMark processes the following data locally on your device, solely to deliver its single purpose (syncing your personal data between devices through your own WebDAV server):</p>
+<table><thead><tr>
+<th>Data type</th><th>Purpose</th><th>Where it is stored</th>
+</tr></thead><tbody>
+<tr><td>Browser bookmarks (titles, URLs, folder structure)</td><td>Two-way sync with WebDAV</td><td>Local browser + your WebDAV</td></tr>
+<tr><td>Login credentials (site, username, password, notes)</td><td>Password vault and autofill</td><td>Local encrypted storage + your WebDAV (ciphertext)</td></tr>
+<tr><td>WebDAV configuration (URL, account, app password)</td><td>Connect to the server you specify</td><td>Local extension storage only</td></tr>
+<tr><td>Master password</td><td>Derive the encryption key</td><td><strong>Memory and session storage only; never uploaded, never written to disk in plaintext</strong></td></tr>
+</tbody></table>
+<h3>2. Encryption</h3>
+<ul>
+<li>Uses the native Web Cryptography API: PBKDF2 (100,000 iterations, SHA-256) for key derivation and AES-256-GCM for authenticated encryption.</li>
+<li>Files uploaded to WebDAV (<code>bookmarks.enc</code>, <code>vault.enc</code>) are <strong>always ciphertext</strong>. <code>meta.json</code> contains only a version number, timestamps, and a random salt — no plaintext content.</li>
+<li>Your master password never leaves your device. If you lose it, the data cannot be recovered, and the developer cannot help recover it.</li>
+</ul>
+<h3>3. Network Requests</h3>
+<p>PassMark sends network requests only to the <strong>WebDAV address you enter in the settings page</strong>. The extension contains no analytics SDK, telemetry, advertising, or third-party tracking code, and sends no data to the developer or any third party.</p>
+<h3>4. Permissions</h3>
+<table><thead><tr>
+<th>Permission</th><th>Why it is needed</th>
+</tr></thead><tbody>
+<tr><td><code>bookmarks</code></td><td>Read and two-way sync browser bookmarks</td></tr>
+<tr><td><code>storage</code> / <code>unlimitedStorage</code></td><td>Store settings, encrypted vault ciphertext, and sync state; bookmark and vault ciphertext may exceed the default quota</td></tr>
+<tr><td><code>alarms</code></td><td>Trigger background auto-sync at your chosen interval (5–60 minutes)</td></tr>
+<tr><td>Access to all sites (<code>&lt;all_urls&gt;</code>)</td><td>(1) Send requests to any WebDAV address you enter; (2) inject the autofill icon next to login forms on any website. The extension does not read or upload page content</td></tr>
+</tbody></table>
+<h3>5. &quot;Remember this device&quot; Option</h3>
+<p>This option is <strong>off by default</strong>. When off, the decryption key is kept only in browser session storage and is discarded when the browser closes.</p>
+<p>If you explicitly enable it, the key is stored in local extension storage (<code>chrome.storage.local</code>) so that autofill and background sync keep working after a browser restart. The key always remains on your device and is never uploaded. On shared devices, keep this option off.</p>
+<h3>6. Data Deletion</h3>
+<ul>
+<li>Uninstalling the extension clears all of its local storage.</li>
+<li>Cloud ciphertext lives on your own WebDAV server. Delete <code>meta.json</code>, <code>bookmarks.enc</code>, and <code>vault.enc</code> under the <code>/passmark/</code> directory yourself.</li>
+<li>The developer holds no copy of your data to delete.</li>
+</ul>
+<h3>7. Children&#x27;s Privacy</h3>
+<p>This extension is not directed to children under 13 and does not knowingly collect any information from them.</p>
+<h3>8. Policy Changes</h3>
+<p>If this policy changes materially, the date at the top of this document will be updated and the change noted on the extension&#x27;s store listing. Continued use constitutes acceptance of the updated policy.</p>
+<h3>9. Contact</h3>
+<p>For questions, please open an issue at &lt;<a href="https://github.com/IceCoder1994/passmark/issues&gt;">https://github.com/IceCoder1994/passmark/issues&gt;</a></p>
+    <footer>
+      PassMark · <a href="https://github.com/IceCoder1994/passmark">GitHub 仓库</a> ·
+      <a href="https://github.com/IceCoder1994/passmark/issues">问题反馈</a>
+    </footer>
+  </div>
+</body>
+</html>

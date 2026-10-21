@@ -10,6 +10,7 @@ export interface SecurityConfig {
   salt: string; // base64 string
   lockTimeoutMinutes: number; // auto-lock timeout
   isConfigured: boolean;
+  rememberDevice: boolean; // 是否在本设备持久保存工作密钥（默认关闭）
 }
 
 export interface VaultItem {

@@ -172,6 +172,8 @@ export function mergeTrees(localTree: SyncBookmarkNode[], remoteTree: SyncBookma
     if (local && remote) {
       result.push({
         id: local.id || remote.id,
+        // 根节点（收藏夹栏 / 其他收藏夹）在不同浏览器中命名不同，
+        // 始终以本地名称为准，避免两端来回改名
         title: local.title || remote.title,
         children: mergeNodeChildren(local.children || [], remote.children || []),
       });

@@ -27,6 +27,11 @@ let activeCryptoKey: CryptoKey | null = null;
 let lastUnlockedTimestamp: number = 0;
 let cachedVaultItems: VaultItem[] | null = null;
 
+/**
+ * 将工作密钥持久化。
+ * 默认仅写入 session storage（浏览器关闭即失效）；
+ * 仅当用户显式开启“记住本设备”时才写入 local storage。
+ */
 async function persistKeyToSession(key: CryptoKey) {
   try {
     const raw = await crypto.subtle.exportKey('raw', key);
@@ -41,8 +46,14 @@ async function persistKeyToSession(key: CryptoKey) {
       });
     }
 
-    // Persist to local device storage for Mode A seamless autofill & sync
-    await setDeviceWorkKey(b64);
+    const security = await getSecurityConfig();
+    if (security.rememberDevice) {
+      // 用户已明确授权在本设备记住密钥，用于跨浏览器重启的自动填充与自动同步
+      await setDeviceWorkKey(b64);
+    } else {
+      // 未授权时确保本地不残留任何工作密钥
+      await setDeviceWorkKey(null);
+    }
   } catch (e) {
     console.warn('[PassMark] Failed to persist key:', e);
   }
@@ -52,9 +63,12 @@ export async function ensureActiveCryptoKey(): Promise<CryptoKey | null> {
   if (activeCryptoKey) return activeCryptoKey;
 
   try {
-    // 1. Check session storage
+    // 1. 优先读取会话密钥（浏览器本次运行期间有效）
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.session) {
-      const sessionData = await chrome.storage.session.get(SESSION_STORAGE_KEY);
+      const sessionData = (await chrome.storage.session.get(SESSION_STORAGE_KEY)) as Record<
+        string,
+        { key?: string; unlockedAt?: number } | undefined
+      >;
       const session = sessionData[SESSION_STORAGE_KEY];
       if (session && session.key) {
         const keyBytes = base64ToUint8Array(session.key);
@@ -65,12 +79,12 @@ export async function ensureActiveCryptoKey(): Promise<CryptoKey | null> {
           true,
           ['encrypt', 'decrypt']
         );
-        lastUnlockedTimestamp = session.unlockedAt;
+        lastUnlockedTimestamp = session.unlockedAt || Date.now();
         return activeCryptoKey;
       }
     }
 
-    // 2. Check trusted local storage for Mode A (Chrome native style)
+    // 2. 回退到本地持久密钥（仅在用户开启“记住本设备”时才会存在）
     const deviceKeyB64 = await getDeviceWorkKey();
     if (deviceKeyB64) {
       const keyBytes = base64ToUint8Array(deviceKeyB64);
@@ -161,11 +175,13 @@ export async function connectAndRestoreFromCloud(
       }
     }
 
-    // Save security config with remote salt
+    // 保存安全配置，沿用远程盐值；是否记住本设备由用户既有设置决定
+    const existingSecurity = await getSecurityConfig();
     await setSecurityConfig({
       salt: remoteMeta.salt,
-      lockTimeoutMinutes: 15,
+      lockTimeoutMinutes: existingSecurity.lockTimeoutMinutes || 15,
       isConfigured: true,
+      rememberDevice: existingSecurity.rememberDevice,
     });
 
     const verifier = remoteMeta.verifier || (await encryptText(AUTH_CHECK_PAYLOAD, key));
@@ -193,10 +209,13 @@ export async function setupMasterPassword(password: string): Promise<boolean> {
   // Initialize empty encrypted vault
   const initialEncryptedVault = await encryptObject<VaultItem[]>([], key);
 
+  // 初始化安全配置，默认不记住本设备
+  const existingSecurity = await getSecurityConfig();
   await setSecurityConfig({
     salt,
-    lockTimeoutMinutes: 15,
+    lockTimeoutMinutes: existingSecurity.lockTimeoutMinutes || 15,
     isConfigured: true,
+    rememberDevice: existingSecurity.rememberDevice,
   });
   await setAuthVerifier(verifier);
   await setEncryptedVault(initialEncryptedVault);

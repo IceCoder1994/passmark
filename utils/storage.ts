@@ -28,6 +28,7 @@ const DEFAULT_SECURITY: SecurityConfig = {
   salt: '',
   lockTimeoutMinutes: 15,
   isConfigured: false,
+  rememberDevice: false,
 };
 
 const DEFAULT_SYNC_OPTIONS: SyncOptions = {
@@ -36,9 +37,26 @@ const DEFAULT_SYNC_OPTIONS: SyncOptions = {
   autoSync: true,
 };
 
+const DEFAULT_SYNC_STATE: SyncState = {
+  isSyncing: false,
+  lastSyncTime: null,
+  lastError: null,
+  bookmarkCount: 0,
+  vaultCount: 0,
+};
+
+/**
+ * 读取单个键值，统一做类型收窄，避免 @types/chrome 的宽泛返回类型
+ */
+async function readKey<T>(key: string): Promise<T | null> {
+  const res = (await chrome.storage.local.get(key)) as Record<string, T | undefined>;
+  const value = res[key];
+  return value === undefined ? null : value;
+}
+
 export async function getWebDavConfig(): Promise<WebDavConfig> {
-  const res = await chrome.storage.local.get(STORAGE_KEYS.WEBDAV_CONFIG);
-  return { ...DEFAULT_WEBDAV, ...(res[STORAGE_KEYS.WEBDAV_CONFIG] || {}) };
+  const stored = await readKey<Partial<WebDavConfig>>(STORAGE_KEYS.WEBDAV_CONFIG);
+  return { ...DEFAULT_WEBDAV, ...(stored || {}) };
 }
 
 export async function setWebDavConfig(config: WebDavConfig): Promise<void> {
@@ -46,8 +64,8 @@ export async function setWebDavConfig(config: WebDavConfig): Promise<void> {
 }
 
 export async function getSecurityConfig(): Promise<SecurityConfig> {
-  const res = await chrome.storage.local.get(STORAGE_KEYS.SECURITY_CONFIG);
-  return { ...DEFAULT_SECURITY, ...(res[STORAGE_KEYS.SECURITY_CONFIG] || {}) };
+  const stored = await readKey<Partial<SecurityConfig>>(STORAGE_KEYS.SECURITY_CONFIG);
+  return { ...DEFAULT_SECURITY, ...(stored || {}) };
 }
 
 export async function setSecurityConfig(config: SecurityConfig): Promise<void> {
@@ -55,8 +73,7 @@ export async function setSecurityConfig(config: SecurityConfig): Promise<void> {
 }
 
 export async function getAuthVerifier(): Promise<string | null> {
-  const res = await chrome.storage.local.get(STORAGE_KEYS.AUTH_VERIFIER);
-  return res[STORAGE_KEYS.AUTH_VERIFIER] || null;
+  return await readKey<string>(STORAGE_KEYS.AUTH_VERIFIER);
 }
 
 export async function setAuthVerifier(verifier: string): Promise<void> {
@@ -64,8 +81,7 @@ export async function setAuthVerifier(verifier: string): Promise<void> {
 }
 
 export async function getEncryptedVault(): Promise<string | null> {
-  const res = await chrome.storage.local.get(STORAGE_KEYS.ENCRYPTED_VAULT);
-  return res[STORAGE_KEYS.ENCRYPTED_VAULT] || null;
+  return await readKey<string>(STORAGE_KEYS.ENCRYPTED_VAULT);
 }
 
 export async function setEncryptedVault(ciphertext: string): Promise<void> {
@@ -73,8 +89,8 @@ export async function setEncryptedVault(ciphertext: string): Promise<void> {
 }
 
 export async function getSyncOptions(): Promise<SyncOptions> {
-  const res = await chrome.storage.local.get(STORAGE_KEYS.SYNC_OPTIONS);
-  return { ...DEFAULT_SYNC_OPTIONS, ...(res[STORAGE_KEYS.SYNC_OPTIONS] || {}) };
+  const stored = await readKey<Partial<SyncOptions>>(STORAGE_KEYS.SYNC_OPTIONS);
+  return { ...DEFAULT_SYNC_OPTIONS, ...(stored || {}) };
 }
 
 export async function setSyncOptions(opts: SyncOptions): Promise<void> {
@@ -82,16 +98,8 @@ export async function setSyncOptions(opts: SyncOptions): Promise<void> {
 }
 
 export async function getSyncState(): Promise<SyncState> {
-  const res = await chrome.storage.local.get(STORAGE_KEYS.LAST_SYNC);
-  return (
-    res[STORAGE_KEYS.LAST_SYNC] || {
-      isSyncing: false,
-      lastSyncTime: null,
-      lastError: null,
-      bookmarkCount: 0,
-      vaultCount: 0,
-    }
-  );
+  const stored = await readKey<Partial<SyncState>>(STORAGE_KEYS.LAST_SYNC);
+  return { ...DEFAULT_SYNC_STATE, ...(stored || {}) };
 }
 
 export async function updateSyncState(patch: Partial<SyncState>): Promise<SyncState> {
@@ -102,8 +110,7 @@ export async function updateSyncState(patch: Partial<SyncState>): Promise<SyncSt
 }
 
 export async function getDeviceWorkKey(): Promise<string | null> {
-  const res = await chrome.storage.local.get(STORAGE_KEYS.DEVICE_WORK_KEY);
-  return res[STORAGE_KEYS.DEVICE_WORK_KEY] || null;
+  return await readKey<string>(STORAGE_KEYS.DEVICE_WORK_KEY);
 }
 
 export async function setDeviceWorkKey(keyBase64: string | null): Promise<void> {

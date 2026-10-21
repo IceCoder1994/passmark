@@ -6,15 +6,18 @@ export default defineConfig({
     plugins: [vue()],
   }),
   manifest: {
-    name: 'PassMark - 书签与密码安全同步',
-    description: '基于 WebDAV 的自托管端到端加密书签与密码同步插件',
-    version: '0.1.0',
+    name: 'PassMark - 收藏夹与密码安全同步',
+    description: '基于 WebDAV 的自托管端到端加密收藏夹与密码同步扩展',
+    version: '1.0.0',
+    homepage_url: 'https://github.com/IceCoder1994/passmark',
     permissions: [
+      // 读取并双向同步浏览器收藏夹
       'bookmarks',
+      // 保存配置、加密后的保险箱密文与同步状态
       'storage',
+      // 收藏夹树与密码库密文可能超过 storage.local 默认配额
       'unlimitedStorage',
-      'activeTab',
-      'scripting',
+      // 按用户设定的间隔触发后台自动同步
       'alarms',
     ],
     host_permissions: ['<all_urls>'],
@@ -35,7 +38,6 @@ export default defineConfig({
     },
     options_ui: {
       page: 'options.html',
-      open_in_tab: true,
     },
   },
 });
